@@ -1,6 +1,9 @@
 name: Deploy website to Beget
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -49,7 +52,7 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          rsync -az \
+          rsync -az --delete \
             --exclude='.git/' \
             --exclude='.github/' \
             --exclude='.gitignore' \
