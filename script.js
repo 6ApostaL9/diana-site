@@ -1,5 +1,3 @@
-const BEHANCE_URL = "https://www.behance.net/d4cc00b0";
-
 const assetSequence = (directory, count) => Array.from(
   { length: count },
   (_, index) => `${directory}/slide-${String(index + 1).padStart(2, "0")}.webp`
@@ -205,9 +203,7 @@ function renderPreview(item) {
 
 function renderArrow(direction) {
   const paths = {
-    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
-    left: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
-    right: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>'
+    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>'
   };
   return `<svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[direction]}</svg>`;
 }
@@ -219,13 +215,12 @@ function renderCards() {
 
 function renderProductSwitcher(item, activeIndex) {
   if (item.type !== "infographic" || item.products.length < 2) return "";
-  return `<div class="product-switcher" role="group" aria-label="Выбор товара">${item.products.map((entry, index) => `<button class="product-pill${index === activeIndex ? " is-active" : ""}" type="button" data-product="${index}" aria-pressed="${index === activeIndex}" style="--pill-color: ${entry.color}">${entry.label}</button>`).join("")}</div>`;
+  return `<div class="case-switcher product-switcher" role="group" aria-label="Выбор товара">${item.products.map((entry, index) => `<button class="case-switcher-pill product-pill${index === activeIndex ? " is-active" : ""}" type="button" data-product="${index}" aria-pressed="${index === activeIndex}">${entry.label}</button>`).join("")}</div>`;
 }
 
-function renderRichNavigation(item) {
+function renderRichSwitcher(item) {
   if (item.type !== "rich") return "";
-  const index = item.richIndex;
-  return `<div class="rich-navigation" aria-label="Навигация между rich-кейсами"><button class="rich-arrow" type="button" data-rich-target="${index - 1}" aria-label="Предыдущий rich-кейс" ${index === 0 ? "disabled" : ""}>${renderArrow("left")}</button><span>${index + 1} / ${richCases.length}</span><button class="rich-arrow" type="button" data-rich-target="${index + 1}" aria-label="Следующий rich-кейс" ${index === richCases.length - 1 ? "disabled" : ""}>${renderArrow("right")}</button></div>`;
+  return `<div class="case-switcher rich-switcher" role="group" aria-label="Выбор Rich-кейса">${richCases.map((entry, index) => `<button class="case-switcher-pill rich-pill${entry === item ? " is-active" : ""}" type="button" data-rich-target="${index}" aria-pressed="${entry === item}">${entry.title}</button>`).join("")}</div>`;
 }
 
 function renderGallery(item, activeProductIndex) {
@@ -237,9 +232,8 @@ function renderGallery(item, activeProductIndex) {
 }
 
 function renderCase(item, activeProductIndex = 0) {
-  dialog.style.setProperty("--case-color", item.color);
   dialogKicker.textContent = `Кейс ${String(item.number).padStart(2, "0")} · ${item.categoryLabel}`;
-  dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichNavigation(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div><div class="behance-cta"><p>Ознакомиться с кейсом подробнее</p><a class="button button-primary" href="${BEHANCE_URL}" target="_blank" rel="noopener">Смотреть на Behance ${renderArrow("upRight")}</a></div>`;
+  dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichSwitcher(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div>`;
   processTypography(dialogContent);
   dialogContent.querySelectorAll("[data-product]").forEach((button) => button.addEventListener("click", () => renderCase(item, Number(button.dataset.product))));
   dialogContent.querySelectorAll("[data-rich-target]").forEach((button) => button.addEventListener("click", () => {
