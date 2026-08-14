@@ -5,6 +5,14 @@ const assetSequence = (directory, count) => Array.from(
   (_, index) => `${directory}/slide-${String(index + 1).padStart(2, "0")}.webp`
 );
 
+const assetImage = (directory, index) => `${directory}/slide-${String(index).padStart(2, "0")}.webp`;
+const infographicCover = (caseSlug, selections) => selections.map(
+  ([productIndex, slideIndex]) => assetImage(
+    `assets/portfolio/infographic/${caseSlug}/product-${String(productIndex).padStart(2, "0")}`,
+    slideIndex
+  )
+);
+
 const product = (label, caseSlug, productIndex, count, color) => ({
   label,
   color,
@@ -21,6 +29,8 @@ const caseItems = [
     intro: "Серия карточек для средств по уходу за автомобилем. Визуальная система объединяет линейку, сохраняя собственные акценты и последовательность подачи каждого товара.",
     description: "Шесть продуктовых серий в единой системе с акцентом на свойствах и сценариях применения.",
     color: "#f1b814", background: "#f2c94c",
+    coverVariant: "auto-cosmetics",
+    coverImages: infographicCover("auto-cosmetics", [[1, 1], [3, 1], [6, 1]]),
     details: [["Формат", "Инфографика для товарной линейки"], ["Работа", "Композиция, ретушь, визуальные акценты"], ["Подача", "От обложки к преимуществам и применению"]],
     products: [
       product("Товар 1", "auto-cosmetics", 1, 8, "#f2be20"), product("Товар 2", "auto-cosmetics", 2, 9, "#e9a51a"),
@@ -34,6 +44,8 @@ const caseItems = [
     intro: "Две товарные серии для автокомпонентов. Карточки объясняют совместимость, конструкцию и ключевые характеристики через крупный продуктовый визуал и понятные смысловые блоки.",
     description: "Две серии карточек с ясной подачей совместимости, устройства и характеристик.",
     color: "#6f2a9c", background: "#6f3c95",
+    coverVariant: "auto-components",
+    coverImages: infographicCover("auto-components", [[1, 1], [1, 8], [2, 1]]),
     details: [["Формат", "Карточки автокомпонентов"], ["Работа", "Иерархия, ретушь, технические акценты"], ["Подача", "Характеристики без визуальной перегрузки"]],
     products: [product("Товар 1", "auto-components", 1, 9, "#71329c"), product("Товар 2", "auto-components", 2, 9, "#9a397e")]
   },
@@ -43,33 +55,41 @@ const caseItems = [
     intro: "Четыре товарные серии бренда BBC. В каждой сохранён общий характер марки, а цвет, окружение и смысловые акценты подстроены под конкретный продукт.",
     description: "Четыре продуктовые серии с единым характером бренда и разными сценариями подачи.",
     color: "#2b8e43", background: "#72b83b",
+    coverVariant: "bbc",
+    coverImages: infographicCover("bbc", [[1, 1], [2, 1], [4, 1]]),
     details: [["Формат", "Серии для маркетплейсов"], ["Работа", "Обложки, преимущества, инструкции"], ["Подача", "Единый бренд-код для разных продуктов"]],
     products: [product("Товар 1", "bbc", 1, 11, "#3f9b55"), product("Товар 2", "bbc", 2, 18, "#6fac33"), product("Товар 3", "bbc", 3, 13, "#2e8750"), product("Товар 4", "bbc", 4, 11, "#88b83e")]
   },
   {
     id: "poekhali", number: 4, category: "infographic", categoryLabel: "Инфографика", type: "infographic",
-    title: "Бренд мотохимии „Поехали“",
+    title: "Бренд мотохимии Поехали",
     intro: "Четыре серии для мотохимии с динамичной визуальной системой. Контрастные акценты, крупный продукт и тематическое окружение поддерживают характер линейки.",
     description: "Динамичная система из четырёх серий для мотохимии и разных сценариев использования.",
     color: "#ef9417", background: "#f1a12a",
+    coverVariant: "poekhali",
+    coverImages: infographicCover("poekhali", [[1, 1], [2, 1], [4, 1]]),
     details: [["Формат", "Инфографика мотолинейки"], ["Работа", "Композиция, ретушь, атмосфера серии"], ["Подача", "Функции продукта и условия применения"]],
     products: [product("Товар 1", "poekhali", 1, 12, "#f09b18"), product("Товар 2", "poekhali", 2, 9, "#d56a1d"), product("Товар 3", "poekhali", 3, 13, "#f2b126"), product("Товар 4", "poekhali", 4, 13, "#c86924")]
   },
   {
     id: "hunt", number: 5, category: "infographic", categoryLabel: "Инфографика", type: "infographic",
-    title: "Hunt",
+    title: "Hunt Line",
     intro: "Три продуктовые серии для специализированной линейки. Сдержанная палитра, предметное окружение и крупные тезисы помогают быстро считать назначение каждого средства.",
     description: "Три технические серии с предметным окружением и чёткой смысловой иерархией.",
     color: "#c44b2b", background: "#8c7950",
+    coverVariant: "hunt",
+    coverImages: infographicCover("hunt", [[1, 1], [2, 1], [3, 1]]),
     details: [["Формат", "Инфографика технических средств"], ["Работа", "Ретушь, окружение, смысловые блоки"], ["Подача", "Назначение и преимущества продукта"]],
     products: [product("Товар 1", "hunt", 1, 13, "#c8492d"), product("Товар 2", "hunt", 2, 13, "#7f704b"), product("Товар 3", "hunt", 3, 9, "#9f5d36")]
   },
   {
     id: "kosmo", number: 6, category: "infographic", categoryLabel: "Инфографика", type: "infographic",
-    title: "Бренд детейлинга „Космо“",
+    title: "Бренд детейлинга Космо",
     intro: "Три серии для детейлинг-линейки „Космо“. Светлое окружение, кислотные цветовые акценты и крупная предметная композиция делают продукты узнаваемыми внутри общей системы.",
     description: "Три серии детейлинг-линейки со светлой композицией и узнаваемыми цветовыми акцентами.",
     color: "#a8c900", background: "#c4dd36",
+    coverVariant: "kosmo",
+    coverImages: infographicCover("kosmo", [[1, 1], [2, 1], [3, 1]]),
     details: [["Формат", "Инфографика детейлинг-линейки"], ["Работа", "Композиция, цвет, ретушь продукта"], ["Подача", "Свойства, ароматы и применение"]],
     products: [product("Товар 1", "kosmo", 1, 12, "#b2d400"), product("Товар 2", "kosmo", 2, 9, "#86b22c"), product("Товар 3", "kosmo", 3, 11, "#c1d94b")]
   },
@@ -79,6 +99,8 @@ const caseItems = [
     intro: "Двенадцать наборов для товаров разных категорий. Для каждого продукта подобраны собственные композиция, цвет и визуальная интонация без неподтверждённых обещаний и лишних деталей.",
     description: "Двенадцать товарных наборов — от канцелярии и товаров для дома до упаковки.",
     color: "#16a45a", background: "#c8ded0",
+    coverVariant: "mixed",
+    coverImages: infographicCover("mixed", [[1, 1], [6, 5], [11, 1]]),
     details: [["Формат", "Инфографика разных категорий"], ["Работа", "Композиция, ретушь, адаптация стилистики"], ["Подача", "Отдельная визуальная логика для каждого товара"]],
     products: [
       product("Металлическая губка", "mixed", 1, 6, "#16a45a"), product("Перманентные маркеры", "mixed", 2, 4, "#159d42"),
@@ -95,6 +117,8 @@ const caseItems = [
     intro: "Последовательный rich-набор о свойствах глянцевого чернителя шин: продукт, преимущества, применение и визуальные детали собраны в единую историю.",
     description: "Rich-последовательность для глянцевого чернителя шин с акцентом на преимуществах и применении.",
     color: "#d6a312", background: "#d5ad2d",
+    coverVariant: "rich-01",
+    coverImages: [1, 4, 7].map((index) => assetImage("assets/portfolio/rich/rich-01", index)),
     details: [["Формат", "Rich-контент"], ["Материал", "7 последовательных модулей"], ["Подача", "Продукт, свойства и применение"]],
     images: assetSequence("assets/portfolio/rich/rich-01", 7)
   },
@@ -104,6 +128,8 @@ const caseItems = [
     intro: "Rich-набор для пенного очистителя обивки. Контрастная розовая система помогает последовательно раскрыть назначение, преимущества и комплект продукта.",
     description: "Семь rich-модулей для очистителя обивки в контрастной продуктовой системе.",
     color: "#d71487", background: "#d33693",
+    coverVariant: "rich-02",
+    coverImages: [1, 4, 7].map((index) => assetImage("assets/portfolio/rich/rich-02", index)),
     details: [["Формат", "Rich-контент"], ["Материал", "7 последовательных модулей"], ["Подача", "Назначение, свойства и комплект"]],
     images: assetSequence("assets/portfolio/rich/rich-02", 7)
   },
@@ -113,6 +139,8 @@ const caseItems = [
     intro: "Пять rich-модулей для очистителя кондиционера. Яркий зелёный акцент связывает продукт, аромат и сценарий использования в цельную последовательность.",
     description: "Пять модулей для очистителя кондиционера с ярким цветовым кодом и последовательной подачей.",
     color: "#91b900", background: "#a5c92e",
+    coverVariant: "rich-03",
+    coverImages: [1, 3, 5].map((index) => assetImage("assets/portfolio/rich/rich-03", index)),
     details: [["Формат", "Rich-контент"], ["Материал", "5 последовательных модулей"], ["Подача", "Продукт, аромат и применение"]],
     images: assetSequence("assets/portfolio/rich/rich-03", 5)
   },
@@ -122,6 +150,8 @@ const caseItems = [
     intro: "Шесть rich-модулей для автошампуня ручной мойки. Визуальная система раскрывает свойства, способ применения и характер продукта без разрыва между блоками.",
     description: "Шесть rich-модулей для автошампуня с цельной зелёной визуальной системой.",
     color: "#13a927", background: "#47b449",
+    coverVariant: "rich-04",
+    coverImages: [1, 3, 6].map((index) => assetImage("assets/portfolio/rich/rich-04", index)),
     details: [["Формат", "Rich-контент"], ["Материал", "6 последовательных модулей"], ["Подача", "Свойства и способ применения"]],
     images: assetSequence("assets/portfolio/rich/rich-04", 6)
   },
@@ -131,6 +161,12 @@ const caseItems = [
     intro: "Три вертикальные motion-работы для товарных карточек. Видео сохраняют фокус на продукте и адаптированы для просмотра в мобильном интерфейсе.",
     description: "Три реальные motion-обложки для товарных карточек в вертикальном формате.",
     color: "#e24c2d", background: "#252525",
+    coverVariant: "video-covers",
+    coverImages: [
+      "assets/portfolio/infographic/hunt/product-03/slide-01.webp",
+      "assets/portfolio/video/poster-02.webp",
+      "assets/portfolio/infographic/hunt/product-01/slide-01.webp"
+    ],
     details: [["Формат", "Вертикальные MP4"], ["Материал", "3 видеообложки"], ["Подача", "Продукт и динамичные визуальные акценты"]],
     videos: [1, 2, 3].map((index) => ({ src: `assets/portfolio/video/video-${String(index).padStart(2, "0")}.mp4`, poster: `assets/portfolio/video/poster-${String(index).padStart(2, "0")}.webp` }))
   },
@@ -140,6 +176,8 @@ const caseItems = [
     intro: "Серия из десяти медийных баннеров в формате 900 × 450. Каждый сюжет работает как самостоятельный рекламный модуль, сохраняя общую продуктовую направленность.",
     description: "Десять медийных баннеров 900 × 450 для разных продуктовых направлений.",
     color: "#5869d8", background: "#c6ccef",
+    coverVariant: "media-banners",
+    coverImages: [1, 6, 10].map((index) => `assets/portfolio/banners/banner-${String(index).padStart(2, "0")}.webp`),
     details: [["Формат", "Медийные баннеры 900 × 450"], ["Материал", "10 рекламных сюжетов"], ["Подача", "Продукт, предложение и визуальный акцент"]],
     images: Array.from({ length: 10 }, (_, index) => `assets/portfolio/banners/banner-${String(index + 1).padStart(2, "0")}.webp`)
   }
@@ -151,16 +189,18 @@ const dialogContent = document.querySelector("#dialog-content");
 const dialogKicker = document.querySelector("#dialog-kicker");
 const richCases = caseItems.filter((item) => item.type === "rich");
 
+function pluralizeRussian(number, forms) {
+  const lastTwoDigits = number % 100;
+  const lastDigit = number % 10;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return forms[2];
+  if (lastDigit === 1) return forms[0];
+  if (lastDigit >= 2 && lastDigit <= 4) return forms[1];
+  return forms[2];
+}
+
 function renderPreview(item) {
-  if (item.type === "video") {
-    const firstVideo = item.videos[0];
-    return `<div class="work-collage work-collage-video" style="--case-bg: ${item.background}"><video src="${firstVideo.src}" poster="${firstVideo.poster}" muted loop autoplay playsinline preload="metadata" tabindex="-1" aria-hidden="true"></video><span class="motion-badge"><span></span> Motion · 3 видео</span></div>`;
-  }
-  const images = item.type === "infographic"
-    ? [item.products[0].images[0], item.products[0].images[1], item.products[1]?.images[0] || item.products[0].images[2]]
-    : item.images.slice(0, 3);
-  const count = item.type === "banners" ? "10 баннеров" : item.type === "rich" ? `${item.images.length} модулей` : `${item.products.length} ${item.products.length === 2 ? "товара" : "товаров"}`;
-  return `<div class="work-collage work-collage-${item.type}" style="--case-bg: ${item.background}">${images.map((image, index) => `<img class="preview-${index + 1}" src="${image}" alt="" loading="lazy" decoding="async">`).join("")}<span class="preview-count">${count}</span></div>`;
+  const count = item.type === "video" ? "3 видео" : item.type === "banners" ? "10 баннеров" : item.type === "rich" ? `${item.images.length} модулей` : `${item.products.length} ${pluralizeRussian(item.products.length, ["товар", "товара", "товаров"])}`;
+  return `<div class="work-collage work-collage-${item.type} cover-${item.coverVariant}" style="--case-bg: ${item.background}; --cover-accent: ${item.color}"><div class="cover-stage" aria-hidden="true">${item.coverImages.map((image, index) => `<span class="cover-panel cover-panel-${index + 1}"><img src="${image}" alt="" loading="lazy" decoding="async"></span>`).join("")}</div><span class="preview-count">${count}</span></div>`;
 }
 
 function renderArrow(direction) {
