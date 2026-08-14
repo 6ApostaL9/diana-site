@@ -188,6 +188,12 @@ const dialog = document.querySelector("#case-dialog");
 const dialogContent = document.querySelector("#dialog-content");
 const dialogKicker = document.querySelector("#dialog-kicker");
 const richCases = caseItems.filter((item) => item.type === "rich");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
+
+function prefersReducedMotion() {
+  return reducedMotion.matches;
+}
 
 function pluralizeRussian(number, forms) {
   const lastTwoDigits = number % 100;
@@ -215,6 +221,68 @@ function renderArrow(direction) {
 function renderCards() {
   workGrid.innerHTML = caseItems.map((item) => `<article class="work-card reveal" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">${renderArrow("upRight")}</span></div><p>${item.description}</p></button></article>`).join("");
   workGrid.querySelectorAll("[data-case]").forEach((button) => button.addEventListener("click", () => openCase(button.dataset.case)));
+  setupCardTilt();
+}
+
+function resetCardTilt(collage) {
+  const stage = collage.querySelector(".cover-stage");
+  if (!stage) return;
+  collage.classList.remove("is-tilting");
+  stage.style.setProperty("--tilt-x", "0deg");
+  stage.style.setProperty("--tilt-y", "0deg");
+  collage.querySelectorAll(".cover-panel").forEach((panel) => {
+    panel.style.setProperty("--pointer-x", "0px");
+    panel.style.setProperty("--pointer-y", "0px");
+  });
+}
+
+function setupCardTilt() {
+  if (!finePointer.matches) return;
+
+  workGrid.querySelectorAll(".work-collage").forEach((collage) => {
+    const stage = collage.querySelector(".cover-stage");
+    const panels = Array.from(collage.querySelectorAll(".cover-panel"));
+    let frameId = 0;
+    let pointerX = 0;
+    let pointerY = 0;
+
+    const paintTilt = () => {
+      frameId = 0;
+      if (prefersReducedMotion()) {
+        resetCardTilt(collage);
+        return;
+      }
+
+      collage.classList.add("is-tilting");
+      stage.style.setProperty("--tilt-x", `${(-pointerY * 1.5).toFixed(2)}deg`);
+      stage.style.setProperty("--tilt-y", `${(pointerX * 1.7).toFixed(2)}deg`);
+      panels.forEach((panel, index) => {
+        const depth = index === 1 ? 4 : 2;
+        panel.style.setProperty("--pointer-x", `${(pointerX * depth).toFixed(2)}px`);
+        panel.style.setProperty("--pointer-y", `${(pointerY * depth).toFixed(2)}px`);
+      });
+    };
+
+    const scheduleTilt = () => {
+      if (!frameId) frameId = requestAnimationFrame(paintTilt);
+    };
+
+    collage.addEventListener("pointermove", (event) => {
+      if (prefersReducedMotion()) return;
+      const bounds = collage.getBoundingClientRect();
+      pointerX = ((event.clientX - bounds.left) / bounds.width - .5) * 2;
+      pointerY = ((event.clientY - bounds.top) / bounds.height - .5) * 2;
+      scheduleTilt();
+    });
+
+    collage.addEventListener("pointerleave", () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = 0;
+      pointerX = 0;
+      pointerY = 0;
+      resetCardTilt(collage);
+    });
+  });
 }
 
 function renderProductSwitcher(item, activeIndex) {
@@ -236,48 +304,309 @@ function renderGallery(item, activeProductIndex) {
   return images.map((image, index) => `<img src="${image}" alt="${item.title} — слайд ${index + 1}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`).join("");
 }
 
+let dialogOpenTimer = 0;
+let dialogCloseTimer = 0;
+let contentSwitchTimer = 0;
+let contentSwitchToken = 0;
+let outgoingContentLayer = null;
+const contentSwitchAnimations = new Set();
+
+function cancelContentSwitch() {
+  contentSwitchToken += 1;
+  clearTimeout(contentSwitchTimer);
+  contentSwitchTimer = 0;
+  contentSwitchAnimations.forEach((animation) => animation.cancel());
+  contentSwitchAnimations.clear();
+  outgoingContentLayer?.remove();
+  outgoingContentLayer = null;
+}
+
+function trackContentAnimation(animation) {
+  contentSwitchAnimations.add(animation);
+  animation.finished.catch(() => {}).finally(() => contentSwitchAnimations.delete(animation));
+}
+
 function renderCase(item, activeProductIndex = 0) {
   dialog.style.setProperty("--case-color", item.color);
   dialogKicker.textContent = `Кейс ${String(item.number).padStart(2, "0")} · ${item.categoryLabel}`;
   dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichNavigation(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div><div class="behance-cta"><p>Ознакомиться с кейсом подробнее</p><a class="button button-primary" href="${BEHANCE_URL}" target="_blank" rel="noopener">Смотреть на Behance ${renderArrow("upRight")}</a></div>`;
   processTypography(dialogContent);
-  dialogContent.querySelectorAll("[data-product]").forEach((button) => button.addEventListener("click", () => renderCase(item, Number(button.dataset.product))));
+  dialogContent.querySelectorAll("[data-product]").forEach((button) => button.addEventListener("click", () => {
+    const nextIndex = Number(button.dataset.product);
+    if (button.classList.contains("is-active")) return;
+    dialogContent.querySelectorAll("[data-product]").forEach((productButton) => {
+      const active = productButton === button;
+      productButton.classList.toggle("is-active", active);
+      productButton.setAttribute("aria-pressed", String(active));
+    });
+    switchCaseContent(item, nextIndex, false, `[data-product="${nextIndex}"]`);
+  }));
   dialogContent.querySelectorAll("[data-rich-target]").forEach((button) => button.addEventListener("click", () => {
     const target = richCases[Number(button.dataset.richTarget)];
     if (!target) return;
-    renderCase(target);
-    dialog.scrollTop = 0;
+    switchCaseContent(target, 0, true, `[aria-label="${button.getAttribute("aria-label")}"]:not(:disabled)`);
   }));
+}
+
+function switchCaseContent(item, activeProductIndex, resetScroll, focusTarget = null) {
+  const previousScroll = dialog.scrollTop;
+  const dialogShell = dialog.querySelector(".dialog-shell");
+  if (prefersReducedMotion() || !dialogShell || typeof dialogContent.animate !== "function") {
+    cancelContentSwitch();
+    dialog.querySelectorAll("video").forEach((video) => video.pause());
+    renderCase(item, activeProductIndex);
+    if (focusTarget) dialogContent.querySelector(focusTarget)?.focus({ preventScroll: true });
+    dialog.scrollTop = resetScroll ? 0 : previousScroll;
+    return;
+  }
+
+  cancelContentSwitch();
+  const token = ++contentSwitchToken;
+  const shellRect = dialogShell.getBoundingClientRect();
+  const contentRect = dialogContent.getBoundingClientRect();
+  const outgoingLayer = document.createElement("div");
+  outgoingLayer.className = "dialog-content dialog-content-transition-layer";
+  outgoingLayer.setAttribute("aria-hidden", "true");
+  outgoingLayer.setAttribute("inert", "");
+  outgoingLayer.style.left = `${contentRect.left - shellRect.left}px`;
+  outgoingLayer.style.top = `${contentRect.top - shellRect.top}px`;
+  outgoingLayer.style.width = `${contentRect.width}px`;
+  while (dialogContent.firstChild) outgoingLayer.appendChild(dialogContent.firstChild);
+  outgoingLayer.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+  outgoingLayer.querySelectorAll("a, button, input, select, textarea, [tabindex]").forEach((element) => element.setAttribute("tabindex", "-1"));
+  outgoingLayer.querySelectorAll("video").forEach((video) => video.pause());
+  dialogShell.appendChild(outgoingLayer);
+  outgoingContentLayer = outgoingLayer;
+
+  renderCase(item, activeProductIndex);
+  if (focusTarget) dialogContent.querySelector(focusTarget)?.focus({ preventScroll: true });
+  dialog.scrollTop = resetScroll ? 0 : previousScroll;
+
+  trackContentAnimation(outgoingLayer.animate([
+    { opacity: 1, transform: "translateY(0)" },
+    { opacity: 0, transform: "translateY(-4px)" }
+  ], { duration: 320, easing: "cubic-bezier(.4,0,1,1)", fill: "both" }));
+  trackContentAnimation(dialogContent.animate([
+    { opacity: 0, transform: "translateY(6px)" },
+    { opacity: 1, transform: "translateY(0)" }
+  ], { duration: 320, easing: "cubic-bezier(0,0,.2,1)", fill: "both" }));
+
+  contentSwitchTimer = window.setTimeout(() => {
+    if (token !== contentSwitchToken) return;
+    contentSwitchAnimations.forEach((animation) => animation.cancel());
+    contentSwitchAnimations.clear();
+    outgoingLayer.remove();
+    if (outgoingContentLayer === outgoingLayer) outgoingContentLayer = null;
+    contentSwitchTimer = 0;
+  }, 370);
 }
 
 function openCase(caseId) {
   const item = caseItems.find((entry) => entry.id === caseId);
   if (!item) return;
+  cancelContentSwitch();
   renderCase(item);
+  clearTimeout(dialogOpenTimer);
+  clearTimeout(dialogCloseTimer);
+  dialog.classList.remove("is-opening", "is-closing", "is-preparing");
+  if (!prefersReducedMotion()) dialog.classList.add("is-preparing");
   dialog.showModal();
   document.body.classList.add("dialog-open");
+
+  if (!prefersReducedMotion()) {
+    requestAnimationFrame(() => {
+      if (!dialog.open) return;
+      dialog.classList.remove("is-preparing");
+      dialog.classList.add("is-opening");
+      dialogOpenTimer = window.setTimeout(() => dialog.classList.remove("is-opening"), 520);
+    });
+  }
+}
+
+function finishDialogClose() {
+  clearTimeout(dialogCloseTimer);
+  dialogCloseTimer = 0;
+  dialog.classList.remove("is-opening", "is-closing", "is-preparing");
+  if (dialog.open) dialog.close();
+  document.body.classList.remove("dialog-open");
 }
 
 function closeDialog() {
+  if (!dialog.open || dialog.classList.contains("is-closing")) return;
   dialog.querySelectorAll("video").forEach((video) => video.pause());
-  dialog.close();
-  document.body.classList.remove("dialog-open");
+  cancelContentSwitch();
+  clearTimeout(dialogOpenTimer);
+  dialogOpenTimer = 0;
+
+  if (prefersReducedMotion()) {
+    finishDialogClose();
+    return;
+  }
+
+  dialog.classList.remove("is-opening", "is-preparing");
+  dialog.classList.add("is-closing");
+  dialogCloseTimer = window.setTimeout(finishDialogClose, 205);
 }
 
 document.querySelector(".dialog-close").addEventListener("click", closeDialog);
 dialog.addEventListener("click", (event) => { if (event.target === dialog) closeDialog(); });
-dialog.addEventListener("close", () => document.body.classList.remove("dialog-open"));
+dialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeDialog();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && dialog.open) {
+    event.preventDefault();
+    closeDialog();
+  }
+});
+dialog.addEventListener("close", () => {
+  clearTimeout(dialogOpenTimer);
+  clearTimeout(dialogCloseTimer);
+  cancelContentSwitch();
+  dialog.classList.remove("is-opening", "is-closing", "is-preparing");
+  document.body.classList.remove("dialog-open");
+});
 
 const filterButtons = document.querySelectorAll("[data-filter]");
+let activeFilter = "all";
+let renderedFilter = "all";
+let filterToken = 0;
+let filterCleanupTimer = 0;
+const filterAnimations = new Set();
+
+function cardMatchesFilter(card, filter) {
+  return filter === "all" || card.dataset.category === filter;
+}
+
+function clearFilterCardStyles(card) {
+  ["position", "left", "top", "width", "height", "z-index", "pointer-events"].forEach((property) => card.style.removeProperty(property));
+  card.classList.remove("is-filter-revealing");
+  if (!card.hidden) card.removeAttribute("inert");
+}
+
+function clearFilterAnimation() {
+  clearTimeout(filterCleanupTimer);
+  filterCleanupTimer = 0;
+  filterAnimations.forEach((animation) => animation.cancel());
+  filterAnimations.clear();
+  workGrid.querySelectorAll(".work-card").forEach((card) => {
+    card.hidden = !cardMatchesFilter(card, renderedFilter);
+    clearFilterCardStyles(card);
+  });
+}
+
+function applyFilter(filter) {
+  workGrid.querySelectorAll(".work-card").forEach((card) => {
+    card.hidden = !cardMatchesFilter(card, filter);
+    clearFilterCardStyles(card);
+  });
+  renderedFilter = filter;
+}
+
+function trackFilterAnimation(animation) {
+  filterAnimations.add(animation);
+  animation.finished.catch(() => {}).finally(() => filterAnimations.delete(animation));
+}
+
 filterButtons.forEach((button) => button.addEventListener("click", () => {
+  const nextFilter = button.dataset.filter;
   filterButtons.forEach((item) => {
     const active = item === button;
     item.classList.toggle("is-active", active);
     item.setAttribute("aria-pressed", String(active));
   });
-  workGrid.querySelectorAll(".work-card").forEach((card) => {
-    card.hidden = button.dataset.filter !== "all" && card.dataset.category !== button.dataset.filter;
+
+  if (nextFilter === activeFilter && nextFilter === renderedFilter && !filterCleanupTimer && filterAnimations.size === 0) return;
+  activeFilter = nextFilter;
+  const token = ++filterToken;
+  clearFilterAnimation();
+
+  const cards = Array.from(workGrid.querySelectorAll(".work-card"));
+  if (prefersReducedMotion() || cards.some((card) => typeof card.animate !== "function")) {
+    applyFilter(nextFilter);
+    return;
+  }
+
+  const gridRect = workGrid.getBoundingClientRect();
+  const previousRects = new Map();
+  const previouslyVisible = cards.filter((card) => !card.hidden);
+  previouslyVisible.forEach((card) => previousRects.set(card, card.getBoundingClientRect()));
+  const outgoingCards = previouslyVisible.filter((card) => !cardMatchesFilter(card, nextFilter));
+
+  outgoingCards.forEach((card) => {
+    const rect = previousRects.get(card);
+    card.style.setProperty("position", "absolute");
+    card.style.setProperty("left", `${rect.left - gridRect.left}px`);
+    card.style.setProperty("top", `${rect.top - gridRect.top}px`);
+    card.style.setProperty("width", `${rect.width}px`);
+    card.style.setProperty("height", `${rect.height}px`);
+    card.style.setProperty("z-index", "2");
+    card.style.setProperty("pointer-events", "none");
+    card.setAttribute("inert", "");
   });
+
+  const nextCards = cards.filter((card) => cardMatchesFilter(card, nextFilter));
+  const newlyRevealedCards = [];
+  cards.forEach((card) => {
+    if (cardMatchesFilter(card, nextFilter)) {
+      card.hidden = false;
+      card.removeAttribute("inert");
+      if (!card.classList.contains("is-visible")) {
+        card.classList.add("is-filter-revealing", "is-visible");
+        newlyRevealedCards.push(card);
+      }
+    } else if (!outgoingCards.includes(card)) {
+      card.hidden = true;
+    }
+  });
+  renderedFilter = nextFilter;
+
+  const nextRects = new Map();
+  nextCards.forEach((card) => nextRects.set(card, card.getBoundingClientRect()));
+  void workGrid.offsetWidth;
+  newlyRevealedCards.forEach((card) => card.classList.remove("is-filter-revealing"));
+
+  outgoingCards.forEach((card) => {
+    if (!card.classList.contains("is-visible")) return;
+    trackFilterAnimation(card.animate([
+      { opacity: 1, transform: "translateY(0)" },
+      { opacity: 0, transform: "translateY(-4px)" }
+    ], { duration: 320, easing: "cubic-bezier(.4,0,1,1)", fill: "both" }));
+  });
+
+  nextCards.forEach((card, index) => {
+    if (!card.classList.contains("is-visible")) return;
+    const previousRect = previousRects.get(card);
+    const nextRect = nextRects.get(card);
+    const wasInViewport = previousRect && previousRect.bottom > 0 && previousRect.top < window.innerHeight;
+    if (wasInViewport) {
+      const deltaX = previousRect.left - nextRect.left;
+      const deltaY = previousRect.top - nextRect.top;
+      if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
+      trackFilterAnimation(card.animate([
+        { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` },
+        { transform: "translate3d(0, 0, 0)" }
+      ], { duration: 340, easing: "cubic-bezier(.22,.75,.22,1)", fill: "both" }));
+      return;
+    }
+
+    trackFilterAnimation(card.animate([
+      { opacity: 0, transform: "translateY(6px)" },
+      { opacity: 1, transform: "translateY(0)" }
+    ], { duration: 320, delay: Math.min(index * 8, 24), easing: "cubic-bezier(0,0,.2,1)", fill: "both" }));
+  });
+
+  filterCleanupTimer = window.setTimeout(() => {
+    if (token !== filterToken) return;
+    filterAnimations.forEach((animation) => animation.cancel());
+    filterAnimations.clear();
+    cards.forEach((card) => {
+      card.hidden = !cardMatchesFilter(card, nextFilter);
+      clearFilterCardStyles(card);
+    });
+    filterCleanupTimer = 0;
+  }, 370);
 }));
 
 const shortWordPattern = /(^|[\s\u00a0(«„"—–-])(в|во|и|а|но|к|ко|с|со|у|о|об|от|до|за|из|на|по|для|при)\s+(?=[^\s\u00a0])/gi;
@@ -316,7 +645,15 @@ document.querySelector("#year").textContent = new Date().getFullYear();
 
 function setupReveal() {
   const elements = document.querySelectorAll(".reveal");
-  if (!("IntersectionObserver" in window)) {
+  [".statement-grid", ".section-head", ".work-grid", ".capability-grid", ".timeline", ".contact-cards"].forEach((selector) => {
+    document.querySelectorAll(selector).forEach((group) => {
+      Array.from(group.children).filter((child) => child.classList.contains("reveal")).forEach((element, index) => {
+        element.style.setProperty("--reveal-delay", `${Math.min(index * 65, 300)}ms`);
+      });
+    });
+  });
+
+  if (prefersReducedMotion() || !("IntersectionObserver" in window)) {
     elements.forEach((element) => element.classList.add("is-visible"));
     return;
   }
@@ -327,9 +664,22 @@ function setupReveal() {
         revealObserver.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.08 });
+  }, { threshold: 0.08, rootMargin: "0px 0px -6% 0px" });
   elements.forEach((element) => revealObserver.observe(element));
 }
+
+function handleReducedMotionChange() {
+  if (!prefersReducedMotion()) return;
+  workGrid.querySelectorAll(".work-collage").forEach(resetCardTilt);
+  clearFilterAnimation();
+  applyFilter(activeFilter);
+  document.querySelectorAll(".reveal").forEach((element) => element.classList.add("is-visible"));
+  if (dialog.classList.contains("is-closing")) finishDialogClose();
+  if (dialog.open) dialog.classList.remove("is-opening", "is-preparing");
+}
+
+if (typeof reducedMotion.addEventListener === "function") reducedMotion.addEventListener("change", handleReducedMotionChange);
+else if (typeof reducedMotion.addListener === "function") reducedMotion.addListener(handleReducedMotionChange);
 
 renderCards();
 processTypography(document.body);
