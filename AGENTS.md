@@ -45,34 +45,82 @@ Codex must not access Beget directly for normal website changes.
 
 Codex must never request, read, expose or modify the private Beget deployment SSH key.
 
-## Normal workflow
+## Mandatory local preview and approval
 
-For each normal website change:
+EVERY project change, without exception, must be shown to the user in a local preview and explicitly approved by the user before any commit, push, Pull Request, merge or production deployment.
 
-1. Check that the repository has no unrelated local changes.
-2. Switch to main.
-3. Update main from origin using fast-forward only.
-4. Create a separate branch named agent/<short-task-name>.
-5. Make only changes related to the user's request.
-6. Inspect the full git diff before committing.
-7. Check that no unrelated files were modified.
-8. Commit with a concise descriptive commit message.
-9. Push the branch to origin.
-10. Create a Pull Request into main.
-11. Review the Pull Request diff.
-12. If the requested change is correct and there are no unrelated modifications, merge the Pull Request into main.
-13. Never force-push main and never rewrite main history.
-14. After merge, monitor the GitHub Actions workflow "Deploy website to Beget".
-15. Do not consider publication complete until the deployment workflow finishes successfully.
-16. If deployment fails, inspect the actual failed job, step and logs before proposing or making a fix.
+This rule also applies to technical changes that are not expected to alter the site's appearance. The local preview is still mandatory so the user can verify that the site continues to open and work correctly.
 
-## Publishing
+Approval applies only to the exact iteration that was previewed. A previous approval never authorizes publication of later changes.
 
-A normal user request to change the website means the change should be implemented and published through:
+## Required workflow
 
-branch → commit → push → Pull Request → merge main → GitHub Actions → Beget
+For every project change:
 
-Do not require a separate "публикуй" confirmation unless the user explicitly says that the change is only a draft, preview, experiment, or must not be published yet.
+1. Check the working tree before starting.
+2. Switch to `main` and synchronize it with `origin/main` using fast-forward only.
+3. Create a separate working branch named `agent/<short-task-name>`.
+4. Make only changes related to the user's request.
+5. Inspect the full Git diff.
+6. If any unrelated changes are present, stop.
+7. Before commit or push, start a local copy of the site from the current working branch.
+8. For this static website, use a local HTTP server without npm, Vite or a build process. Prefer:
+
+   `python3 -m http.server 8000 --bind 127.0.0.1`
+
+   If port 8000 is occupied, automatically select another available localhost port.
+9. Open the local site in the Codex in-app browser.
+10. Tell the user the exact localhost URL.
+11. Stop and wait for the user's explicit decision.
+
+Before explicit user approval, never:
+- commit;
+- push;
+- create a Pull Request;
+- merge;
+- modify `main`;
+- start a production deployment.
+
+If the user requests additional changes:
+
+1. Continue in the same working branch.
+2. Make the requested changes.
+3. Inspect the full diff again.
+4. Update or restart the local preview when necessary.
+5. Open the current preview in the Codex in-app browser again.
+6. Stop and wait for a new explicit approval.
+
+Repeat this preview-and-approval cycle after every iteration. Never treat an earlier approval as permission to publish subsequent edits.
+
+## Publishing after approval
+
+Publication is allowed only after an explicit user command such as:
+- "публикуй";
+- "выкатывай";
+- "всё хорошо, публикуй";
+- "можно в main";
+- another unambiguous command with the same meaning.
+
+After explicit approval:
+
+1. Inspect the final Git diff.
+2. Confirm that no unrelated changes are present.
+3. Commit with a concise descriptive commit message.
+4. Push the working branch to origin.
+5. Create a Pull Request into `main`.
+6. Review the final Pull Request diff.
+7. Merge the Pull Request into `main`.
+8. Wait for the GitHub Actions workflow "Deploy website to Beget" to finish.
+9. Check every deployment job and step.
+10. Consider the task complete only after the deployment succeeds.
+
+If deployment fails:
+
+1. Do not consider the task complete.
+2. Identify the specific failed job and step.
+3. Inspect the actual logs and determine the concrete technical cause.
+4. Make fixes in a separate working branch.
+5. Show every fix in a local preview and obtain explicit user approval again before publishing it.
 
 ## Safety
 
@@ -84,4 +132,5 @@ Never:
 - expose credentials or SSH private keys;
 - edit Beget production files directly;
 - modify unrelated project files;
+- publish any change without the mandatory local preview and explicit user approval;
 - ignore or bypass a failed deployment.
