@@ -31,10 +31,10 @@
     "email": "mailto:dianaba0908@gmail.com",
     "telephone": "+79962301765",
     "address": {"@type": "PostalAddress", "addressLocality": "Челябинск", "addressCountry": "RU"},
-    "sameAs": ["https://t.me/dianchichik"]
+    "sameAs": ["https://t.me/dianchichik", "https://www.behance.net/d4cc00b0"]
   }
   </script>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260814-2">
 </head>
 <body>
   <a class="skip-link" href="#content">Перейти к содержимому</a>
@@ -65,10 +65,11 @@
         <div class="hero-actions">
           <a class="button button-primary" href="#works">Смотреть работы <span>↓</span></a>
           <a class="button button-ghost" href="assets/diana-boklazhenko-resume.pdf" target="_blank" rel="noopener">Открыть резюме ↗</a>
+          <a class="button button-behance" href="https://www.behance.net/d4cc00b0" target="_blank" rel="noopener">Портфолио на Behance ↗</a>
         </div>
         <dl class="hero-facts" aria-label="Краткая информация">
           <div><dt>3+ года</dt><dd>в дизайне</dd></div>
-          <div><dt>6 кейсов</dt><dd>в подборке</dd></div>
+          <div><dt>13 кейсов</dt><dd>в подборке</dd></div>
           <div><dt>Челябинск</dt><dd>офис / удалённо</dd></div>
         </dl>
       </div>
@@ -92,112 +93,22 @@
       <div class="section-head reveal">
         <div>
           <p class="section-kicker">Портфолио</p>
-          <h2>Выбранные работы</h2>
+          <h2>Проекты и кейсы</h2>
         </div>
-        <p>В подборке — проекты для разных категорий товаров: от визуальных систем для целых линеек до отдельных карточек и продуктовых серий.</p>
+        <p>Инфографика, rich-контент, видеообложки и медийные баннеры — от отдельных работ до визуальных систем товарных линеек.</p>
       </div>
 
       <div class="filter-panel" aria-label="Фильтры портфолио">
-        <div class="subfilter-row" role="group" aria-label="Тип инфографики">
-          <span>Фильтр работ:</span>
-          <button class="subfilter is-active" type="button" data-group="all">Все</button>
-          <button class="subfilter" type="button" data-group="series">Товарные линейки</button>
-          <button class="subfilter" type="button" data-group="auto">Автохимия</button>
-          <button class="subfilter" type="button" data-group="mixed">Разные товары</button>
+        <div class="portfolio-filters" role="group" aria-label="Категории работ">
+          <button class="filter-pill is-active" type="button" data-filter="all" aria-pressed="true">Все</button>
+          <button class="filter-pill" type="button" data-filter="infographic" aria-pressed="false">Инфографика</button>
+          <button class="filter-pill" type="button" data-filter="rich" aria-pressed="false">Rich-контент</button>
+          <button class="filter-pill" type="button" data-filter="video" aria-pressed="false">Видеообложки</button>
+          <button class="filter-pill" type="button" data-filter="banners" aria-pressed="false">Медийные баннеры</button>
         </div>
       </div>
 
-      <div class="work-grid" id="work-grid">
-        <article class="work-card reveal" data-groups="series auto">
-          <button class="work-open" type="button" data-case="moto" aria-label="Открыть кейс: линейка мотохимии LAVR">
-            <div class="work-collage theme-orange">
-              <img src="assets/moto-01.jpg" alt="Обложка очистителя цепи LAVR" loading="lazy" decoding="async">
-              <img src="assets/moto-02.jpg" alt="Слайд с рекомендациями по применению" loading="lazy" decoding="async">
-              <img src="assets/moto-03.jpg" alt="Слайд о защите цепи" loading="lazy" decoding="async">
-            </div>
-            <div class="work-meta">
-              <div><span>01 · Инфографика</span><h3>Линейка мотохимии LAVR</h3></div>
-              <span class="open-arrow">↗</span>
-            </div>
-            <p>Концепции обложек, визуальная система линейки и серия продуктовых слайдов.</p>
-          </button>
-        </article>
-
-        <article class="work-card reveal" data-groups="series">
-          <button class="work-open" type="button" data-case="gun" aria-label="Открыть кейс: химия для ухода за оружием">
-            <div class="work-collage theme-olive">
-              <img src="assets/gun-01.jpg" alt="Обложка оружейного масла" loading="lazy" decoding="async">
-              <img src="assets/gun-02.jpg" alt="Слайд о профессиональном уходе" loading="lazy" decoding="async">
-              <img src="assets/gun-03.jpg" alt="Слайд о применении очистителя" loading="lazy" decoding="async">
-            </div>
-            <div class="work-meta">
-              <div><span>02 · Инфографика</span><h3>Уход за оружием</h3></div>
-              <span class="open-arrow">↗</span>
-            </div>
-            <p>Единый визуальный язык для технического продукта и разных сценариев использования.</p>
-          </button>
-        </article>
-
-        <article class="work-card reveal" data-groups="series auto">
-          <button class="work-open" type="button" data-case="shampoo" aria-label="Открыть кейс: линейка автошампуней">
-            <div class="work-collage theme-pink">
-              <img src="assets/shampoo-01.jpg" alt="Обложка автошампуня LAVR" loading="lazy" decoding="async">
-              <img src="assets/shampoo-02.jpg" alt="Вариант обложки автошампуня" loading="lazy" decoding="async">
-              <img src="assets/shampoo-03.jpg" alt="Слайд о нанесении автошампуня" loading="lazy" decoding="async">
-            </div>
-            <div class="work-meta">
-              <div><span>03 · Инфографика</span><h3>Линейка автошампуней</h3></div>
-              <span class="open-arrow">↗</span>
-            </div>
-            <p>Три направления обложек и последовательная подача свойств продукта.</p>
-          </button>
-        </article>
-
-        <article class="work-card reveal" data-groups="series auto">
-          <button class="work-open" type="button" data-case="parts" aria-label="Открыть кейс: автокомпоненты двух брендов">
-            <div class="work-collage theme-red">
-              <img src="assets/parts-01.jpg" alt="Карточка щётки стеклоочистителя BBC" loading="lazy" decoding="async">
-              <img src="assets/parts-02.jpg" alt="Слайд о силиконовой ленте" loading="lazy" decoding="async">
-              <img src="assets/parts-03.jpg" alt="Карточка щётки стеклоочистителя Lecar" loading="lazy" decoding="async">
-            </div>
-            <div class="work-meta">
-              <div><span>04 · Инфографика</span><h3>Автокомпоненты · 2 бренда</h3></div>
-              <span class="open-arrow">↗</span>
-            </div>
-            <p>Две узнаваемые системы в одной товарной категории без потери различий брендов.</p>
-          </button>
-        </article>
-
-        <article class="work-card reveal" data-groups="series auto">
-          <button class="work-open" type="button" data-case="chem" aria-label="Открыть кейс: автохимия и автокосметика">
-            <div class="work-collage theme-blue">
-              <img src="assets/chem-01.jpg" alt="Карточка полироли пластика BBC" loading="lazy" decoding="async">
-              <img src="assets/chem-02.jpg" alt="Слайд о применении полироли" loading="lazy" decoding="async">
-              <img src="assets/chem-03.jpg" alt="Слайд о нанесении средства" loading="lazy" decoding="async">
-            </div>
-            <div class="work-meta">
-              <div><span>05 · Инфографика</span><h3>Автохимия и автокосметика</h3></div>
-              <span class="open-arrow">↗</span>
-            </div>
-            <p>Карточки для разных продуктов: выгоды, характеристики, инструкции и сценарии применения.</p>
-          </button>
-        </article>
-
-        <article class="work-card reveal" data-groups="mixed">
-          <button class="work-open" type="button" data-case="goods" aria-label="Открыть кейс: товары разных категорий">
-            <div class="work-collage theme-lilac">
-              <img src="assets/goods-01.jpg" alt="Карточка металлической губки" loading="lazy" decoding="async">
-              <img src="assets/goods-02.jpg" alt="Карточка маркеров" loading="lazy" decoding="async">
-              <img src="assets/goods-03.jpg" alt="Карточка ватных дисков" loading="lazy" decoding="async">
-            </div>
-            <div class="work-meta">
-              <div><span>06 · Инфографика</span><h3>Разные товарные категории</h3></div>
-              <span class="open-arrow">↗</span>
-            </div>
-            <p>Бытовые товары, маркеры и косметические аксессуары — разные аудитории и визуальные задачи.</p>
-          </button>
-        </article>
-      </div>
+      <div class="work-grid" id="work-grid"></div>
 
     </section>
 
@@ -256,7 +167,7 @@
     <section class="contact" id="contacts">
       <div class="shell contact-inner">
         <p class="section-kicker">Контакты</p>
-        <h2>Обсудим задачу<br>или новую роль?</h2>
+        <h2>Открыта к работе<br>и новым проектам</h2>
         <div class="contact-cards">
           <a class="contact-card" href="mailto:dianaba0908@gmail.com">
             <span class="contact-icon" aria-hidden="true">
@@ -292,11 +203,16 @@
     </div>
   </footer>
 
-  <dialog class="case-dialog" id="case-dialog">
-    <button class="dialog-close" type="button" aria-label="Закрыть кейс">Закрыть ×</button>
-    <div class="dialog-content" id="dialog-content"></div>
+  <dialog class="case-dialog" id="case-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-shell">
+      <div class="dialog-topbar">
+        <span class="dialog-kicker" id="dialog-kicker"></span>
+        <button class="dialog-close" type="button" aria-label="Закрыть кейс">Закрыть ×</button>
+      </div>
+      <div class="dialog-content" id="dialog-content"></div>
+    </div>
   </dialog>
 
-  <script src="script.js"></script>
+  <script src="script.js?v=20260814-2"></script>
 </body>
 </html>
