@@ -163,8 +163,17 @@ function renderPreview(item) {
   return `<div class="work-collage work-collage-${item.type}" style="--case-bg: ${item.background}">${images.map((image, index) => `<img class="preview-${index + 1}" src="${image}" alt="" loading="lazy" decoding="async">`).join("")}<span class="preview-count">${count}</span></div>`;
 }
 
+function renderArrow(direction) {
+  const paths = {
+    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
+    left: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
+    right: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>'
+  };
+  return `<svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[direction]}</svg>`;
+}
+
 function renderCards() {
-  workGrid.innerHTML = caseItems.map((item) => `<article class="work-card reveal" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">↗</span></div><p>${item.description}</p></button></article>`).join("");
+  workGrid.innerHTML = caseItems.map((item) => `<article class="work-card reveal" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">${renderArrow("upRight")}</span></div><p>${item.description}</p></button></article>`).join("");
   workGrid.querySelectorAll("[data-case]").forEach((button) => button.addEventListener("click", () => openCase(button.dataset.case)));
 }
 
@@ -176,7 +185,7 @@ function renderProductSwitcher(item, activeIndex) {
 function renderRichNavigation(item) {
   if (item.type !== "rich") return "";
   const index = item.richIndex;
-  return `<div class="rich-navigation" aria-label="Навигация между rich-кейсами"><button class="rich-arrow" type="button" data-rich-target="${index - 1}" aria-label="Предыдущий rich-кейс" ${index === 0 ? "disabled" : ""}>←</button><span>${index + 1} / ${richCases.length}</span><button class="rich-arrow" type="button" data-rich-target="${index + 1}" aria-label="Следующий rich-кейс" ${index === richCases.length - 1 ? "disabled" : ""}>→</button></div>`;
+  return `<div class="rich-navigation" aria-label="Навигация между rich-кейсами"><button class="rich-arrow" type="button" data-rich-target="${index - 1}" aria-label="Предыдущий rich-кейс" ${index === 0 ? "disabled" : ""}>${renderArrow("left")}</button><span>${index + 1} / ${richCases.length}</span><button class="rich-arrow" type="button" data-rich-target="${index + 1}" aria-label="Следующий rich-кейс" ${index === richCases.length - 1 ? "disabled" : ""}>${renderArrow("right")}</button></div>`;
 }
 
 function renderGallery(item, activeProductIndex) {
@@ -190,7 +199,7 @@ function renderGallery(item, activeProductIndex) {
 function renderCase(item, activeProductIndex = 0) {
   dialog.style.setProperty("--case-color", item.color);
   dialogKicker.textContent = `Кейс ${String(item.number).padStart(2, "0")} · ${item.categoryLabel}`;
-  dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichNavigation(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div><div class="behance-cta"><p>Ознакомиться с кейсом подробнее</p><a class="button button-primary" href="${BEHANCE_URL}" target="_blank" rel="noopener">Смотреть на Behance ↗</a></div>`;
+  dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichNavigation(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div><div class="behance-cta"><p>Ознакомиться с кейсом подробнее</p><a class="button button-primary" href="${BEHANCE_URL}" target="_blank" rel="noopener">Смотреть на Behance ${renderArrow("upRight")}</a></div>`;
   processTypography(dialogContent);
   dialogContent.querySelectorAll("[data-product]").forEach((button) => button.addEventListener("click", () => renderCase(item, Number(button.dataset.product))));
   dialogContent.querySelectorAll("[data-rich-target]").forEach((button) => button.addEventListener("click", () => {
