@@ -185,6 +185,7 @@ const workGrid = document.querySelector("#work-grid");
 const dialog = document.querySelector("#case-dialog");
 const dialogContent = document.querySelector("#dialog-content");
 const dialogKicker = document.querySelector("#dialog-kicker");
+let portfolioCards = [];
 const richCases = caseItems.filter((item) => item.type === "rich");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
@@ -209,13 +210,51 @@ function renderPreview(item) {
 
 function renderArrow(direction) {
   const paths = {
-    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>'
+    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
+    left: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
+    right: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>'
   };
   return `<svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[direction]}</svg>`;
 }
 
+function prepareImageSource(source) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+    const timeout = window.setTimeout(finish, 2500);
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+      resolve();
+    }
+
+    function decodeAndFinish() {
+      if (typeof image.decode !== "function") {
+        finish();
+        return;
+      }
+      image.decode().catch(() => {}).finally(finish);
+    }
+
+    image.decoding = "async";
+    image.onload = decodeAndFinish;
+    image.onerror = finish;
+    image.src = source;
+    if (image.complete) queueMicrotask(image.naturalWidth ? decodeAndFinish : finish);
+  });
+}
+
+function prepareImages(sources) {
+  return Promise.all(Array.from(new Set(sources)).map(prepareImageSource));
+}
+
 function renderCards() {
   workGrid.innerHTML = caseItems.map((item) => `<article class="work-card reveal" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">${renderArrow("upRight")}</span></div><p>${item.description}</p></button></article>`).join("");
+  portfolioCards = Array.from(workGrid.children);
   workGrid.querySelectorAll("[data-case]").forEach((button) => button.addEventListener("click", () => openCase(button.dataset.case)));
   setupCardTilt();
 }
@@ -281,120 +320,188 @@ function setupCardTilt() {
   });
 }
 
-function renderProductSwitcher(item, activeIndex) {
-  if (item.type !== "infographic" || item.products.length < 2) return "";
-  return `<div class="case-switcher product-switcher" role="group" aria-label="Выбор товара">${item.products.map((entry, index) => `<button class="case-switcher-pill product-pill${index === activeIndex ? " is-active" : ""}" type="button" data-product="${index}" aria-pressed="${index === activeIndex}">${entry.label}</button>`).join("")}</div>`;
-}
-
-function renderRichSwitcher(item) {
-  if (item.type !== "rich") return "";
-  return `<div class="case-switcher rich-switcher" role="group" aria-label="Выбор Rich-кейса">${richCases.map((entry, index) => `<button class="case-switcher-pill rich-pill${entry === item ? " is-active" : ""}" type="button" data-rich-target="${index}" aria-pressed="${entry === item}">${entry.title}</button>`).join("")}</div>`;
-}
-
-function renderGallery(item, activeProductIndex) {
-  if (item.type === "video") {
-    return item.videos.map((video, index) => `<figure class="dialog-video"><video src="${video.src}" poster="${video.poster}" controls muted loop playsinline preload="metadata" aria-label="Видеообложка ${index + 1}"></video><figcaption>Видеообложка ${String(index + 1).padStart(2, "0")}</figcaption></figure>`).join("");
+function createCaseState(item) {
+  if (item.type === "infographic") {
+    return { type: "product", rootItem: item, variants: item.products, index: 0 };
   }
-  const images = item.type === "infographic" ? item.products[activeProductIndex].images : item.images;
-  return images.map((image, index) => `<img src="${image}" alt="${item.title} — слайд ${index + 1}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`).join("");
+  if (item.type === "rich") {
+    return { type: "rich", rootItem: item, variants: richCases, index: item.richIndex ?? richCases.indexOf(item) };
+  }
+  return { type: "single", rootItem: item, variants: [item], index: 0 };
+}
+
+function getCaseVariantView(state, index = state.index) {
+  if (state.type === "product") {
+    const variant = state.variants[index];
+    const item = state.rootItem;
+    return {
+      item,
+      index,
+      title: variant.title ?? item.title,
+      intro: variant.intro ?? variant.description ?? item.intro,
+      details: variant.details ?? item.details,
+      images: variant.images,
+      videos: null,
+      galleryType: item.type,
+      number: variant.number ?? item.number,
+      categoryLabel: variant.categoryLabel ?? item.categoryLabel
+    };
+  }
+
+  const item = state.type === "rich" ? state.variants[index] : state.rootItem;
+  return {
+    item,
+    index,
+    title: item.title,
+    intro: item.intro,
+    details: item.details,
+    images: item.images ?? [],
+    videos: item.videos ?? null,
+    galleryType: item.type,
+    number: item.number,
+    categoryLabel: item.categoryLabel
+  };
+}
+
+function renderVariantGallery(view) {
+  if (view.videos) {
+    return view.videos.map((video, index) => `<figure class="dialog-video"><video src="${video.src}" poster="${video.poster}" controls muted loop playsinline preload="metadata" aria-label="Видеообложка ${index + 1}"></video><figcaption>Видеообложка ${String(index + 1).padStart(2, "0")}</figcaption></figure>`).join("");
+  }
+  return view.images.map((image, index) => `<img src="${image}" alt="${view.title} — слайд ${index + 1}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`).join("");
+}
+
+function renderCaseVariant(view, titleId = "dialog-title") {
+  return `<header class="dialog-heading"><h2 id="${titleId}">${view.title}</h2><p class="dialog-intro">${view.intro}</p></header><div class="dialog-details">${view.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${view.galleryType}">${renderVariantGallery(view)}</div>`;
+}
+
+function renderCaseNavigation(state) {
+  if (state.variants.length < 2) return "";
+  const itemName = state.type === "product" ? "товар" : "Rich-кейс";
+  return `<div class="case-variant-navigation" role="group" aria-label="Навигация между вариантами"><button class="case-variant-arrow" type="button" data-case-step="-1" aria-label="Предыдущий ${itemName}">${renderArrow("left")}</button><span class="case-variant-label" aria-live="polite"></span><button class="case-variant-arrow" type="button" data-case-step="1" aria-label="Следующий ${itemName}">${renderArrow("right")}</button></div>`;
 }
 
 let dialogOpenTimer = 0;
 let dialogCloseTimer = 0;
-let contentSwitchTimer = 0;
-let contentSwitchToken = 0;
-let outgoingContentLayer = null;
-const contentSwitchAnimations = new Set();
+let currentCaseState = null;
+let caseSwitchToken = 0;
+let caseSwitching = false;
+const caseSwitchAnimations = new Set();
+
+function updateCaseNavigation() {
+  const navigation = dialogContent.querySelector(".case-variant-navigation");
+  if (!navigation || !currentCaseState) return;
+  const { index, variants, type } = currentCaseState;
+  const focusedStep = document.activeElement?.dataset.caseStep;
+  const previousButton = navigation.querySelector('[data-case-step="-1"]');
+  const nextButton = navigation.querySelector('[data-case-step="1"]');
+  previousButton.disabled = index === 0;
+  nextButton.disabled = index === variants.length - 1;
+  navigation.querySelector(".case-variant-label").textContent = type === "product"
+    ? `Товар ${index + 1} из ${variants.length}`
+    : `Rich-кейс ${index + 1} из ${variants.length}`;
+  if (focusedStep === "-1" && previousButton.disabled) nextButton.focus({ preventScroll: true });
+  if (focusedStep === "1" && nextButton.disabled) previousButton.focus({ preventScroll: true });
+}
+
+function applyCaseVariant(index) {
+  if (!currentCaseState) return null;
+  currentCaseState.index = index;
+  const view = getCaseVariantView(currentCaseState, index);
+  dialogKicker.textContent = `Кейс ${String(view.number).padStart(2, "0")} · ${view.categoryLabel}`;
+  const variableContent = dialogContent.querySelector(".case-variant-content");
+  variableContent.innerHTML = renderCaseVariant(view);
+  processTypography(variableContent);
+  updateCaseNavigation();
+  return view;
+}
 
 function cancelContentSwitch() {
-  contentSwitchToken += 1;
-  clearTimeout(contentSwitchTimer);
-  contentSwitchTimer = 0;
-  contentSwitchAnimations.forEach((animation) => animation.cancel());
-  contentSwitchAnimations.clear();
-  outgoingContentLayer?.remove();
-  outgoingContentLayer = null;
+  caseSwitchToken += 1;
+  caseSwitchAnimations.forEach((animation) => animation.cancel());
+  caseSwitchAnimations.clear();
+  caseSwitching = false;
+  const track = dialogContent.querySelector(".case-variant-track");
+  track?.querySelectorAll(".case-variant-content.is-pending").forEach((content) => content.remove());
+  track?.style.removeProperty("transform");
+  track?.style.removeProperty("will-change");
 }
 
-function trackContentAnimation(animation) {
-  contentSwitchAnimations.add(animation);
-  animation.finished.catch(() => {}).finally(() => contentSwitchAnimations.delete(animation));
+function trackCaseSwitchAnimation(animation) {
+  caseSwitchAnimations.add(animation);
+  animation.finished.catch(() => {}).finally(() => caseSwitchAnimations.delete(animation));
+  return animation;
 }
 
-function renderCase(item, activeProductIndex = 0) {
-  dialogKicker.textContent = `Кейс ${String(item.number).padStart(2, "0")} · ${item.categoryLabel}`;
-  dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichSwitcher(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div>`;
-  processTypography(dialogContent);
-  dialogContent.querySelectorAll("[data-product]").forEach((button) => button.addEventListener("click", () => {
-    const nextIndex = Number(button.dataset.product);
-    if (button.classList.contains("is-active")) return;
-    dialogContent.querySelectorAll("[data-product]").forEach((productButton) => {
-      const active = productButton === button;
-      productButton.classList.toggle("is-active", active);
-      productButton.setAttribute("aria-pressed", String(active));
-    });
-    switchCaseContent(item, nextIndex, false, `[data-product="${nextIndex}"]`);
-  }));
-  dialogContent.querySelectorAll("[data-rich-target]").forEach((button) => button.addEventListener("click", () => {
-    const targetIndex = Number(button.dataset.richTarget);
-    const target = richCases[targetIndex];
-    if (!target) return;
-    if (button.classList.contains("is-active")) return;
-    switchCaseContent(target, 0, true, `[data-rich-target="${targetIndex}"]`);
+function renderCase(item) {
+  currentCaseState = createCaseState(item);
+  dialogContent.innerHTML = `${renderCaseNavigation(currentCaseState)}<div class="case-variant-viewport"><div class="case-variant-track"><div class="case-variant-content"></div></div></div>`;
+  applyCaseVariant(currentCaseState.index);
+  dialogContent.querySelectorAll("[data-case-step]").forEach((button) => button.addEventListener("click", () => {
+    if (caseSwitching || !currentCaseState) return;
+    const direction = Number(button.dataset.caseStep);
+    const nextIndex = currentCaseState.index + direction;
+    if (nextIndex < 0 || nextIndex >= currentCaseState.variants.length) return;
+    switchCaseVariant(nextIndex, direction);
   }));
 }
 
-function switchCaseContent(item, activeProductIndex, resetScroll, focusTarget = null) {
+async function switchCaseVariant(nextIndex, direction) {
+  if (!currentCaseState || caseSwitching) return;
+  caseSwitching = true;
+  clearTimeout(dialogOpenTimer);
+  dialogOpenTimer = 0;
+  dialog.classList.remove("is-opening", "is-preparing");
+  const token = ++caseSwitchToken;
+  const nextView = getCaseVariantView(currentCaseState, nextIndex);
+  await prepareImages(nextView.images);
+  if (token !== caseSwitchToken || !dialog.open) return;
+
+  const track = dialogContent.querySelector(".case-variant-track");
+  const variableContent = track?.querySelector(".case-variant-content");
+  if (!track || !variableContent) return;
   const previousScroll = dialog.scrollTop;
-  const dialogShell = dialog.querySelector(".dialog-shell");
-  if (prefersReducedMotion() || !dialogShell || typeof dialogContent.animate !== "function") {
-    cancelContentSwitch();
+
+  if (prefersReducedMotion() || typeof track.animate !== "function") {
     dialog.querySelectorAll("video").forEach((video) => video.pause());
-    renderCase(item, activeProductIndex);
-    if (focusTarget) dialogContent.querySelector(focusTarget)?.focus({ preventScroll: true });
-    dialog.scrollTop = resetScroll ? 0 : previousScroll;
+    applyCaseVariant(nextIndex);
+    dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
+    caseSwitching = false;
     return;
   }
 
-  cancelContentSwitch();
-  const token = ++contentSwitchToken;
-  const shellRect = dialogShell.getBoundingClientRect();
-  const contentRect = dialogContent.getBoundingClientRect();
-  const outgoingLayer = document.createElement("div");
-  outgoingLayer.className = "dialog-content dialog-content-transition-layer";
-  outgoingLayer.setAttribute("aria-hidden", "true");
-  outgoingLayer.setAttribute("inert", "");
-  outgoingLayer.style.left = `${contentRect.left - shellRect.left}px`;
-  outgoingLayer.style.top = `${contentRect.top - shellRect.top}px`;
-  outgoingLayer.style.width = `${contentRect.width}px`;
-  while (dialogContent.firstChild) outgoingLayer.appendChild(dialogContent.firstChild);
-  outgoingLayer.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
-  outgoingLayer.querySelectorAll("a, button, input, select, textarea, [tabindex]").forEach((element) => element.setAttribute("tabindex", "-1"));
-  outgoingLayer.querySelectorAll("video").forEach((video) => video.pause());
-  dialogShell.appendChild(outgoingLayer);
-  outgoingContentLayer = outgoingLayer;
+  const nextContent = document.createElement("div");
+  nextContent.className = "case-variant-content is-pending";
+  nextContent.setAttribute("aria-hidden", "true");
+  nextContent.setAttribute("inert", "");
+  nextContent.innerHTML = renderCaseVariant(nextView, "dialog-title-next");
+  processTypography(nextContent);
+  if (direction > 0) track.appendChild(nextContent);
+  else track.insertBefore(nextContent, variableContent);
+  track.style.setProperty("will-change", "transform");
 
-  renderCase(item, activeProductIndex);
-  if (focusTarget) dialogContent.querySelector(focusTarget)?.focus({ preventScroll: true });
-  dialog.scrollTop = resetScroll ? 0 : previousScroll;
+  const startPosition = direction > 0 ? "translate3d(0,0,0)" : "translate3d(-100%,0,0)";
+  const endPosition = direction > 0 ? "translate3d(-100%,0,0)" : "translate3d(0,0,0)";
+  const slideAnimation = trackCaseSwitchAnimation(track.animate([
+    { transform: startPosition },
+    { transform: endPosition }
+  ], { duration: 420, easing: "cubic-bezier(.22,.72,.22,1)", fill: "forwards" }));
+  await slideAnimation.finished.catch(() => {});
+  if (token !== caseSwitchToken || !dialog.open) return;
 
-  trackContentAnimation(outgoingLayer.animate([
-    { opacity: 1, transform: "translateY(0)" },
-    { opacity: 0, transform: "translateY(-4px)" }
-  ], { duration: 320, easing: "cubic-bezier(.4,0,1,1)", fill: "both" }));
-  trackContentAnimation(dialogContent.animate([
-    { opacity: 0, transform: "translateY(6px)" },
-    { opacity: 1, transform: "translateY(0)" }
-  ], { duration: 320, easing: "cubic-bezier(0,0,.2,1)", fill: "both" }));
-
-  contentSwitchTimer = window.setTimeout(() => {
-    if (token !== contentSwitchToken) return;
-    contentSwitchAnimations.forEach((animation) => animation.cancel());
-    contentSwitchAnimations.clear();
-    outgoingLayer.remove();
-    if (outgoingContentLayer === outgoingLayer) outgoingContentLayer = null;
-    contentSwitchTimer = 0;
-  }, 370);
+  slideAnimation.cancel();
+  dialog.querySelectorAll("video").forEach((video) => video.pause());
+  track.replaceChildren(nextContent);
+  nextContent.classList.remove("is-pending");
+  nextContent.removeAttribute("aria-hidden");
+  nextContent.removeAttribute("inert");
+  nextContent.querySelector("#dialog-title-next")?.setAttribute("id", "dialog-title");
+  track.style.removeProperty("will-change");
+  track.style.removeProperty("transform");
+  currentCaseState.index = nextIndex;
+  dialogKicker.textContent = `Кейс ${String(nextView.number).padStart(2, "0")} · ${nextView.categoryLabel}`;
+  updateCaseNavigation();
+  dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
+  caseSwitching = false;
 }
 
 function openCase(caseId) {
@@ -460,149 +567,127 @@ dialog.addEventListener("close", () => {
   clearTimeout(dialogOpenTimer);
   clearTimeout(dialogCloseTimer);
   cancelContentSwitch();
+  currentCaseState = null;
   dialog.classList.remove("is-opening", "is-closing", "is-preparing");
   document.body.classList.remove("dialog-open");
 });
 
 const filterButtons = document.querySelectorAll("[data-filter]");
 let activeFilter = "all";
-let renderedFilter = "all";
 let filterToken = 0;
-let filterCleanupTimer = 0;
-const filterAnimations = new Set();
+const filterTransitionAnimations = new Set();
+let filterTransitionLayers = [];
+let filterCleanupFrame = 0;
 
 function cardMatchesFilter(card, filter) {
   return filter === "all" || card.dataset.category === filter;
 }
 
-function clearFilterCardStyles(card) {
-  ["position", "left", "top", "width", "height", "z-index", "pointer-events"].forEach((property) => card.style.removeProperty(property));
-  card.classList.remove("is-filter-revealing");
-  if (!card.hidden) card.removeAttribute("inert");
+function getPortfolioCards() {
+  return portfolioCards;
 }
 
-function clearFilterAnimation() {
-  clearTimeout(filterCleanupTimer);
-  filterCleanupTimer = 0;
-  filterAnimations.forEach((animation) => animation.cancel());
-  filterAnimations.clear();
-  workGrid.querySelectorAll(".work-card").forEach((card) => {
-    card.hidden = !cardMatchesFilter(card, renderedFilter);
-    clearFilterCardStyles(card);
-  });
+function clearFilterTransition() {
+  filterTransitionAnimations.forEach((animation) => animation.cancel());
+  filterTransitionAnimations.clear();
+  cancelAnimationFrame(filterCleanupFrame);
+  filterCleanupFrame = 0;
+  filterTransitionLayers.forEach((layer) => layer.remove());
+  filterTransitionLayers = [];
+  getPortfolioCards().forEach((card) => card.style.removeProperty("visibility"));
+  workGrid.classList.remove("is-filter-transitioning");
+  workGrid.style.removeProperty("min-height");
 }
 
 function applyFilter(filter) {
-  workGrid.querySelectorAll(".work-card").forEach((card) => {
-    card.hidden = !cardMatchesFilter(card, filter);
-    clearFilterCardStyles(card);
+  const insertionPoint = filterTransitionLayers.find((layer) => layer.parentElement === workGrid) ?? null;
+  Array.from(workGrid.children).filter((element) => element.classList.contains("work-card")).forEach((card) => card.remove());
+  getPortfolioCards().filter((card) => cardMatchesFilter(card, filter)).forEach((card) => {
+    card.hidden = false;
+    card.classList.add("is-visible");
+    workGrid.insertBefore(card, insertionPoint);
   });
-  renderedFilter = filter;
 }
 
-function trackFilterAnimation(animation) {
-  filterAnimations.add(animation);
-  animation.finished.catch(() => {}).finally(() => filterAnimations.delete(animation));
+function createFilterTransitionLayer(cards, className) {
+  const layer = document.createElement("div");
+  layer.className = `work-grid work-grid-transition-layer ${className}`;
+  layer.setAttribute("aria-hidden", "true");
+  layer.setAttribute("inert", "");
+  cards.forEach((card) => {
+    const clone = card.cloneNode(true);
+    clone.hidden = false;
+    clone.classList.add("is-visible");
+    clone.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+    clone.querySelectorAll("a, button, input, select, textarea, [tabindex]").forEach((element) => element.setAttribute("tabindex", "-1"));
+    clone.querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
+    layer.appendChild(clone);
+  });
+  return layer;
 }
 
-filterButtons.forEach((button) => button.addEventListener("click", () => {
+filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", async () => {
   const nextFilter = button.dataset.filter;
+  if (nextFilter === activeFilter) return;
+  const currentButtonIndex = Array.from(filterButtons).findIndex((item) => item.dataset.filter === activeFilter);
+  const direction = buttonIndex > currentButtonIndex ? 1 : -1;
+  activeFilter = nextFilter;
   filterButtons.forEach((item) => {
     const active = item === button;
     item.classList.toggle("is-active", active);
     item.setAttribute("aria-pressed", String(active));
   });
 
-  if (nextFilter === activeFilter && nextFilter === renderedFilter && !filterCleanupTimer && filterAnimations.size === 0) return;
-  activeFilter = nextFilter;
   const token = ++filterToken;
-  clearFilterAnimation();
+  clearFilterTransition();
 
-  const cards = Array.from(workGrid.querySelectorAll(".work-card"));
-  if (prefersReducedMotion() || cards.some((card) => typeof card.animate !== "function")) {
+  const cards = getPortfolioCards();
+  const nextCards = cards.filter((card) => cardMatchesFilter(card, nextFilter));
+  await prepareImages(nextCards.flatMap((card) => Array.from(card.querySelectorAll("img"), (image) => image.currentSrc || image.src)));
+  if (token !== filterToken) return;
+
+  if (prefersReducedMotion() || typeof workGrid.animate !== "function") {
     applyFilter(nextFilter);
     return;
   }
 
-  const gridRect = workGrid.getBoundingClientRect();
-  const previousRects = new Map();
-  const previouslyVisible = cards.filter((card) => !card.hidden);
-  previouslyVisible.forEach((card) => previousRects.set(card, card.getBoundingClientRect()));
-  const outgoingCards = previouslyVisible.filter((card) => !cardMatchesFilter(card, nextFilter));
+  const currentCards = Array.from(workGrid.children).filter((element) => element.classList.contains("work-card"));
+  const oldLayer = createFilterTransitionLayer(currentCards, "is-leaving");
+  const nextLayer = createFilterTransitionLayer(nextCards, "is-entering");
+  oldLayer.style.visibility = "hidden";
+  nextLayer.style.visibility = "hidden";
+  workGrid.append(oldLayer, nextLayer);
+  const oldHeight = Math.ceil(workGrid.getBoundingClientRect().height);
+  const newHeight = Math.ceil(nextLayer.getBoundingClientRect().height);
+  const stableHeight = Math.max(oldHeight, newHeight);
+  workGrid.style.setProperty("min-height", `${stableHeight}px`);
+  oldLayer.style.setProperty("min-height", `${stableHeight}px`);
+  nextLayer.style.setProperty("min-height", `${stableHeight}px`);
+  currentCards.forEach((card) => card.style.setProperty("visibility", "hidden"));
+  workGrid.classList.add("is-filter-transitioning");
+  oldLayer.style.removeProperty("visibility");
+  nextLayer.style.removeProperty("visibility");
+  filterTransitionLayers = [oldLayer, nextLayer];
 
-  outgoingCards.forEach((card) => {
-    const rect = previousRects.get(card);
-    card.style.setProperty("position", "absolute");
-    card.style.setProperty("left", `${rect.left - gridRect.left}px`);
-    card.style.setProperty("top", `${rect.top - gridRect.top}px`);
-    card.style.setProperty("width", `${rect.width}px`);
-    card.style.setProperty("height", `${rect.height}px`);
-    card.style.setProperty("z-index", "2");
-    card.style.setProperty("pointer-events", "none");
-    card.setAttribute("inert", "");
-  });
+  const animationOptions = { duration: 460, easing: "cubic-bezier(.22,.72,.22,1)", fill: "both" };
+  const oldAnimation = oldLayer.animate([
+    { transform: "translate3d(0,0,0)" },
+    { transform: `translate3d(${-direction * 100}%,0,0)` }
+  ], animationOptions);
+  const nextAnimation = nextLayer.animate([
+    { transform: `translate3d(${direction * 100}%,0,0)` },
+    { transform: "translate3d(0,0,0)" }
+  ], animationOptions);
+  filterTransitionAnimations.add(oldAnimation);
+  filterTransitionAnimations.add(nextAnimation);
+  await Promise.all([oldAnimation.finished.catch(() => {}), nextAnimation.finished.catch(() => {})]);
+  if (token !== filterToken) return;
 
-  const nextCards = cards.filter((card) => cardMatchesFilter(card, nextFilter));
-  const newlyRevealedCards = [];
-  cards.forEach((card) => {
-    if (cardMatchesFilter(card, nextFilter)) {
-      card.hidden = false;
-      card.removeAttribute("inert");
-      if (!card.classList.contains("is-visible")) {
-        card.classList.add("is-filter-revealing", "is-visible");
-        newlyRevealedCards.push(card);
-      }
-    } else if (!outgoingCards.includes(card)) {
-      card.hidden = true;
-    }
-  });
-  renderedFilter = nextFilter;
-
-  const nextRects = new Map();
-  nextCards.forEach((card) => nextRects.set(card, card.getBoundingClientRect()));
-  void workGrid.offsetWidth;
-  newlyRevealedCards.forEach((card) => card.classList.remove("is-filter-revealing"));
-
-  outgoingCards.forEach((card) => {
-    if (!card.classList.contains("is-visible")) return;
-    trackFilterAnimation(card.animate([
-      { opacity: 1, transform: "translateY(0)" },
-      { opacity: 0, transform: "translateY(-4px)" }
-    ], { duration: 320, easing: "cubic-bezier(.4,0,1,1)", fill: "both" }));
-  });
-
-  nextCards.forEach((card, index) => {
-    if (!card.classList.contains("is-visible")) return;
-    const previousRect = previousRects.get(card);
-    const nextRect = nextRects.get(card);
-    const wasInViewport = previousRect && previousRect.bottom > 0 && previousRect.top < window.innerHeight;
-    if (wasInViewport) {
-      const deltaX = previousRect.left - nextRect.left;
-      const deltaY = previousRect.top - nextRect.top;
-      if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
-      trackFilterAnimation(card.animate([
-        { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` },
-        { transform: "translate3d(0, 0, 0)" }
-      ], { duration: 340, easing: "cubic-bezier(.22,.75,.22,1)", fill: "both" }));
-      return;
-    }
-
-    trackFilterAnimation(card.animate([
-      { opacity: 0, transform: "translateY(6px)" },
-      { opacity: 1, transform: "translateY(0)" }
-    ], { duration: 320, delay: Math.min(index * 8, 24), easing: "cubic-bezier(0,0,.2,1)", fill: "both" }));
-  });
-
-  filterCleanupTimer = window.setTimeout(() => {
+  applyFilter(nextFilter);
+  filterCleanupFrame = requestAnimationFrame(() => {
     if (token !== filterToken) return;
-    filterAnimations.forEach((animation) => animation.cancel());
-    filterAnimations.clear();
-    cards.forEach((card) => {
-      card.hidden = !cardMatchesFilter(card, nextFilter);
-      clearFilterCardStyles(card);
-    });
-    filterCleanupTimer = 0;
-  }, 370);
+    clearFilterTransition();
+  });
 }));
 
 const shortWordPattern = /(^|[\s\u00a0(«„"—–-])(в|во|и|а|но|к|ко|с|со|у|о|об|от|до|за|из|на|по|для|при)\s+(?=[^\s\u00a0])/gi;
@@ -667,8 +752,10 @@ function setupReveal() {
 function handleReducedMotionChange() {
   if (!prefersReducedMotion()) return;
   workGrid.querySelectorAll(".work-collage").forEach(resetCardTilt);
-  clearFilterAnimation();
+  filterToken += 1;
+  clearFilterTransition();
   applyFilter(activeFilter);
+  cancelContentSwitch();
   document.querySelectorAll(".reveal").forEach((element) => element.classList.add("is-visible"));
   if (dialog.classList.contains("is-closing")) finishDialogClose();
   if (dialog.open) dialog.classList.remove("is-opening", "is-preparing");
