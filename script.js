@@ -185,7 +185,16 @@ const workGrid = document.querySelector("#work-grid");
 const dialog = document.querySelector("#case-dialog");
 const dialogContent = document.querySelector("#dialog-content");
 const dialogKicker = document.querySelector("#dialog-kicker");
+let portfolioCards = [];
 const richCases = caseItems.filter((item) => item.type === "rich");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
+const preparedImagePromises = new Map();
+const preparedImageSources = new Set();
+
+function prefersReducedMotion() {
+  return reducedMotion.matches;
+}
 
 function pluralizeRussian(number, forms) {
   const lastTwoDigits = number % 100;
@@ -203,76 +212,637 @@ function renderPreview(item) {
 
 function renderArrow(direction) {
   const paths = {
-    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>'
+    upRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
+    left: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
+    right: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>'
   };
   return `<svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[direction]}</svg>`;
 }
 
+function prepareImageSource(source) {
+  if (!source) return Promise.resolve();
+  if (preparedImagePromises.has(source)) return preparedImagePromises.get(source);
+
+  const preparation = new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      preparedImageSources.add(source);
+      resolve();
+    }
+
+    function decodeAndFinish() {
+      if (typeof image.decode !== "function") {
+        finish();
+        return;
+      }
+      image.decode().catch(() => {}).finally(finish);
+    }
+
+    image.decoding = "async";
+    image.onload = decodeAndFinish;
+    image.onerror = finish;
+    image.src = source;
+    if (image.complete) queueMicrotask(image.naturalWidth ? decodeAndFinish : finish);
+  });
+  preparedImagePromises.set(source, preparation);
+  return preparation;
+}
+
+function prepareImages(sources) {
+  return Promise.all(Array.from(new Set(sources)).map(prepareImageSource));
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+function getCardImageSources(cards) {
+  return cards.flatMap((card) => Array.from(card.querySelectorAll("img"), (image) => image.currentSrc || image.src));
+}
+
 function renderCards() {
   workGrid.innerHTML = caseItems.map((item) => `<article class="work-card reveal" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">${renderArrow("upRight")}</span></div><p>${item.description}</p></button></article>`).join("");
+  portfolioCards = Array.from(workGrid.children);
   workGrid.querySelectorAll("[data-case]").forEach((button) => button.addEventListener("click", () => openCase(button.dataset.case)));
+  setupCardTilt();
 }
 
-function renderProductSwitcher(item, activeIndex) {
-  if (item.type !== "infographic" || item.products.length < 2) return "";
-  return `<div class="case-switcher product-switcher" role="group" aria-label="Выбор товара">${item.products.map((entry, index) => `<button class="case-switcher-pill product-pill${index === activeIndex ? " is-active" : ""}" type="button" data-product="${index}" aria-pressed="${index === activeIndex}">${entry.label}</button>`).join("")}</div>`;
+function resetCardTilt(collage) {
+  const stage = collage.querySelector(".cover-stage");
+  if (!stage) return;
+  collage.classList.remove("is-tilting");
+  stage.style.setProperty("--tilt-x", "0deg");
+  stage.style.setProperty("--tilt-y", "0deg");
+  collage.querySelectorAll(".cover-panel").forEach((panel) => {
+    panel.style.setProperty("--pointer-x", "0px");
+    panel.style.setProperty("--pointer-y", "0px");
+  });
 }
 
-function renderRichSwitcher(item) {
-  if (item.type !== "rich") return "";
-  return `<div class="case-switcher rich-switcher" role="group" aria-label="Выбор Rich-кейса">${richCases.map((entry, index) => `<button class="case-switcher-pill rich-pill${entry === item ? " is-active" : ""}" type="button" data-rich-target="${index}" aria-pressed="${entry === item}">${entry.title}</button>`).join("")}</div>`;
+function setupCardTilt() {
+  if (!finePointer.matches) return;
+
+  workGrid.querySelectorAll(".work-collage").forEach((collage) => {
+    const stage = collage.querySelector(".cover-stage");
+    const panels = Array.from(collage.querySelectorAll(".cover-panel"));
+    let frameId = 0;
+    let pointerX = 0;
+    let pointerY = 0;
+
+    const paintTilt = () => {
+      frameId = 0;
+      if (prefersReducedMotion()) {
+        resetCardTilt(collage);
+        return;
+      }
+
+      collage.classList.add("is-tilting");
+      stage.style.setProperty("--tilt-x", `${(-pointerY * 1.5).toFixed(2)}deg`);
+      stage.style.setProperty("--tilt-y", `${(pointerX * 1.7).toFixed(2)}deg`);
+      panels.forEach((panel, index) => {
+        const depth = index === 1 ? 4 : 2;
+        panel.style.setProperty("--pointer-x", `${(pointerX * depth).toFixed(2)}px`);
+        panel.style.setProperty("--pointer-y", `${(pointerY * depth).toFixed(2)}px`);
+      });
+    };
+
+    const scheduleTilt = () => {
+      if (!frameId) frameId = requestAnimationFrame(paintTilt);
+    };
+
+    collage.addEventListener("pointermove", (event) => {
+      if (prefersReducedMotion()) return;
+      const bounds = collage.getBoundingClientRect();
+      pointerX = ((event.clientX - bounds.left) / bounds.width - .5) * 2;
+      pointerY = ((event.clientY - bounds.top) / bounds.height - .5) * 2;
+      scheduleTilt();
+    });
+
+    collage.addEventListener("pointerleave", () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = 0;
+      pointerX = 0;
+      pointerY = 0;
+      resetCardTilt(collage);
+    });
+  });
 }
 
-function renderGallery(item, activeProductIndex) {
-  if (item.type === "video") {
-    return item.videos.map((video, index) => `<figure class="dialog-video"><video src="${video.src}" poster="${video.poster}" controls muted loop playsinline preload="metadata" aria-label="Видеообложка ${index + 1}"></video><figcaption>Видеообложка ${String(index + 1).padStart(2, "0")}</figcaption></figure>`).join("");
+function createCaseState(item) {
+  if (item.type === "infographic") {
+    return { type: "product", rootItem: item, variants: item.products, index: 0 };
   }
-  const images = item.type === "infographic" ? item.products[activeProductIndex].images : item.images;
-  return images.map((image, index) => `<img src="${image}" alt="${item.title} — слайд ${index + 1}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`).join("");
+  if (item.type === "rich") {
+    return { type: "rich", rootItem: item, variants: richCases, index: item.richIndex ?? richCases.indexOf(item) };
+  }
+  return { type: "single", rootItem: item, variants: [item], index: 0 };
 }
 
-function renderCase(item, activeProductIndex = 0) {
-  dialogKicker.textContent = `Кейс ${String(item.number).padStart(2, "0")} · ${item.categoryLabel}`;
-  dialogContent.innerHTML = `<header class="dialog-heading"><h2 id="dialog-title">${item.title}</h2><p class="dialog-intro">${item.intro}</p></header>${renderProductSwitcher(item, activeProductIndex)}${renderRichSwitcher(item)}<div class="dialog-details">${item.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${item.type}">${renderGallery(item, activeProductIndex)}</div>`;
-  processTypography(dialogContent);
-  dialogContent.querySelectorAll("[data-product]").forEach((button) => button.addEventListener("click", () => renderCase(item, Number(button.dataset.product))));
-  dialogContent.querySelectorAll("[data-rich-target]").forEach((button) => button.addEventListener("click", () => {
-    const target = richCases[Number(button.dataset.richTarget)];
-    if (!target) return;
-    renderCase(target);
-    dialog.scrollTop = 0;
+function getCaseVariantView(state, index = state.index) {
+  if (state.type === "product") {
+    const variant = state.variants[index];
+    const item = state.rootItem;
+    return {
+      item,
+      index,
+      title: variant.title ?? item.title,
+      intro: variant.intro ?? variant.description ?? item.intro,
+      details: variant.details ?? item.details,
+      images: variant.images,
+      videos: null,
+      galleryType: item.type,
+      number: variant.number ?? item.number,
+      categoryLabel: variant.categoryLabel ?? item.categoryLabel
+    };
+  }
+
+  const item = state.type === "rich" ? state.variants[index] : state.rootItem;
+  return {
+    item,
+    index,
+    title: item.title,
+    intro: item.intro,
+    details: item.details,
+    images: item.images ?? [],
+    videos: item.videos ?? null,
+    galleryType: item.type,
+    number: item.number,
+    categoryLabel: item.categoryLabel
+  };
+}
+
+function renderVariantGallery(view) {
+  if (view.videos) {
+    return view.videos.map((video, index) => `<figure class="dialog-video"><video src="${video.src}" poster="${video.poster}" controls muted loop playsinline preload="metadata" aria-label="Видеообложка ${index + 1}"></video><figcaption>Видеообложка ${String(index + 1).padStart(2, "0")}</figcaption></figure>`).join("");
+  }
+  return view.images.map((image, index) => `<img src="${image}" alt="${view.title} — слайд ${index + 1}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`).join("");
+}
+
+function renderCaseVariant(view, titleId = "dialog-title") {
+  return `<header class="dialog-heading"><h2 id="${titleId}">${view.title}</h2><p class="dialog-intro">${view.intro}</p></header><div class="dialog-details">${view.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${view.galleryType}">${renderVariantGallery(view)}</div>`;
+}
+
+function renderCaseNavigation(state) {
+  if (state.variants.length < 2) return "";
+  const itemName = state.type === "product" ? "товар" : "Rich-кейс";
+  return `<div class="case-variant-navigation" role="group" aria-label="Навигация между вариантами"><button class="case-variant-arrow" type="button" data-case-step="-1" aria-label="Предыдущий ${itemName}">${renderArrow("left")}</button><span class="case-variant-label" aria-live="polite"></span><button class="case-variant-arrow" type="button" data-case-step="1" aria-label="Следующий ${itemName}">${renderArrow("right")}</button></div>`;
+}
+
+let dialogOpenTimer = 0;
+let dialogCloseTimer = 0;
+let currentCaseState = null;
+let caseSwitchToken = 0;
+let caseSwitching = false;
+let activeCaseTargetIndex = null;
+let queuedCaseIndex = null;
+let casePreloadGeneration = 0;
+const caseSwitchAnimations = new Set();
+
+function setCaseBusy(busy, direction = 0) {
+  const navigation = dialogContent.querySelector(".case-variant-navigation");
+  const viewport = dialogContent.querySelector(".case-variant-viewport");
+  navigation?.classList.toggle("is-busy", busy);
+  navigation?.setAttribute("aria-busy", String(busy));
+  viewport?.setAttribute("aria-busy", String(busy));
+  if (busy && direction) navigation?.setAttribute("data-busy-direction", String(direction));
+  else navigation?.removeAttribute("data-busy-direction");
+}
+
+function updateCaseNavigation() {
+  const navigation = dialogContent.querySelector(".case-variant-navigation");
+  if (!navigation || !currentCaseState) return;
+  const { index, variants, type } = currentCaseState;
+  const focusedStep = document.activeElement?.dataset.caseStep;
+  const previousButton = navigation.querySelector('[data-case-step="-1"]');
+  const nextButton = navigation.querySelector('[data-case-step="1"]');
+  previousButton.disabled = index === 0;
+  nextButton.disabled = index === variants.length - 1;
+  navigation.querySelector(".case-variant-label").textContent = type === "product"
+    ? `Товар ${index + 1} из ${variants.length}`
+    : `Rich-кейс ${index + 1} из ${variants.length}`;
+  if (focusedStep === "-1" && previousButton.disabled) nextButton.focus({ preventScroll: true });
+  if (focusedStep === "1" && nextButton.disabled) previousButton.focus({ preventScroll: true });
+}
+
+function applyCaseVariant(index) {
+  if (!currentCaseState) return null;
+  currentCaseState.index = index;
+  const view = getCaseVariantView(currentCaseState, index);
+  dialogKicker.textContent = `Кейс ${String(view.number).padStart(2, "0")} · ${view.categoryLabel}`;
+  const variableContent = dialogContent.querySelector(".case-variant-content");
+  variableContent.innerHTML = renderCaseVariant(view);
+  processTypography(variableContent);
+  updateCaseNavigation();
+  return view;
+}
+
+function getCriticalCaseImageSource(view) {
+  if (!view.images.length) return null;
+  const currentImages = Array.from(dialogContent.querySelectorAll(".case-variant-content .dialog-gallery img"));
+  const dialogRect = dialog.getBoundingClientRect();
+  const firstVisibleIndex = currentImages.findIndex((image) => {
+    const rect = image.getBoundingClientRect();
+    return rect.bottom > dialogRect.top && rect.top < dialogRect.bottom;
+  });
+  const startIndex = firstVisibleIndex >= 0 ? firstVisibleIndex : 0;
+  return view.images[startIndex] ?? view.images[0];
+}
+
+function buildCaseVariantFragment(view) {
+  const template = document.createElement("template");
+  template.innerHTML = renderCaseVariant(view);
+  processTypography(template.content);
+  return template.content;
+}
+
+function cancelCasePreload() {
+  casePreloadGeneration += 1;
+}
+
+function preloadAdjacentCaseVariant(direction = 1) {
+  cancelCasePreload();
+  if (!currentCaseState || currentCaseState.variants.length < 2 || !dialog.open) return;
+  const preferredIndex = currentCaseState.index + direction;
+  const fallbackIndex = currentCaseState.index - direction;
+  const targetIndex = preferredIndex >= 0 && preferredIndex < currentCaseState.variants.length
+    ? preferredIndex
+    : fallbackIndex;
+  if (targetIndex < 0 || targetIndex >= currentCaseState.variants.length) return;
+  const generation = casePreloadGeneration;
+  const source = getCaseVariantView(currentCaseState, targetIndex).images[0];
+  if (!source) return;
+  prepareImageSource(source).then(() => {
+    if (generation !== casePreloadGeneration || !dialog.open) return;
+  });
+}
+
+function finishCaseSwitch(direction) {
+  caseSwitching = false;
+  activeCaseTargetIndex = null;
+  const nextQueuedIndex = queuedCaseIndex;
+  queuedCaseIndex = null;
+  if (dialog.open && currentCaseState && nextQueuedIndex !== null && nextQueuedIndex !== currentCaseState.index) {
+    switchCaseVariant(nextQueuedIndex, nextQueuedIndex > currentCaseState.index ? 1 : -1);
+    return;
+  }
+  setCaseBusy(false);
+  preloadAdjacentCaseVariant(direction);
+}
+
+function cancelContentSwitch() {
+  caseSwitchToken += 1;
+  cancelCasePreload();
+  caseSwitchAnimations.forEach((animation) => animation.cancel());
+  caseSwitchAnimations.clear();
+  caseSwitching = false;
+  activeCaseTargetIndex = null;
+  queuedCaseIndex = null;
+  setCaseBusy(false);
+  const variableContent = dialogContent.querySelector(".case-variant-content");
+  variableContent?.style.removeProperty("transform");
+}
+
+function trackCaseSwitchAnimation(animation) {
+  caseSwitchAnimations.add(animation);
+  animation.finished.catch(() => {}).finally(() => caseSwitchAnimations.delete(animation));
+  return animation;
+}
+
+function renderCase(item) {
+  currentCaseState = createCaseState(item);
+  dialogContent.innerHTML = `${renderCaseNavigation(currentCaseState)}<div class="case-variant-viewport" aria-busy="false"><div class="case-variant-content"></div></div>`;
+  applyCaseVariant(currentCaseState.index);
+  dialogContent.querySelectorAll("[data-case-step]").forEach((button) => button.addEventListener("click", () => {
+    if (!currentCaseState) return;
+    const direction = Number(button.dataset.caseStep);
+    const baseIndex = caseSwitching ? (queuedCaseIndex ?? activeCaseTargetIndex ?? currentCaseState.index) : currentCaseState.index;
+    const nextIndex = baseIndex + direction;
+    if (nextIndex < 0 || nextIndex >= currentCaseState.variants.length) return;
+    if (caseSwitching) {
+      queuedCaseIndex = nextIndex;
+      return;
+    }
+    switchCaseVariant(nextIndex, direction);
   }));
+}
+
+async function switchCaseVariant(nextIndex, direction) {
+  if (!currentCaseState || caseSwitching) return;
+  caseSwitching = true;
+  activeCaseTargetIndex = nextIndex;
+  setCaseBusy(true, direction);
+  cancelCasePreload();
+  clearTimeout(dialogOpenTimer);
+  dialogOpenTimer = 0;
+  dialog.classList.remove("is-opening", "is-preparing");
+  const token = ++caseSwitchToken;
+  const nextView = getCaseVariantView(currentCaseState, nextIndex);
+  const criticalSource = getCriticalCaseImageSource(nextView);
+  if (criticalSource && !preparedImageSources.has(criticalSource)) await prepareImageSource(criticalSource);
+  if (!prefersReducedMotion()) await nextAnimationFrame();
+  if (token !== caseSwitchToken || !dialog.open) return;
+
+  const variableContent = dialogContent.querySelector(".case-variant-content");
+  if (!variableContent) {
+    finishCaseSwitch(direction);
+    return;
+  }
+  const previousScroll = dialog.scrollTop;
+
+  if (prefersReducedMotion() || typeof variableContent.animate !== "function") {
+    dialog.querySelectorAll("video").forEach((video) => video.pause());
+    applyCaseVariant(nextIndex);
+    dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
+    finishCaseSwitch(direction);
+    return;
+  }
+
+  const nextFragment = buildCaseVariantFragment(nextView);
+  const distance = 28;
+  const outgoingAnimation = trackCaseSwitchAnimation(variableContent.animate([
+    { transform: "translate3d(0,0,0)" },
+    { transform: `translate3d(${-direction * distance}px,0,0)` }
+  ], { duration: 100, easing: "cubic-bezier(.4,0,.8,.4)", fill: "both" }));
+  await outgoingAnimation.finished.catch(() => {});
+  if (token !== caseSwitchToken || !dialog.open) return;
+
+  outgoingAnimation.cancel();
+  dialog.querySelectorAll("video").forEach((video) => video.pause());
+  variableContent.replaceChildren(nextFragment);
+  currentCaseState.index = nextIndex;
+  dialogKicker.textContent = `Кейс ${String(nextView.number).padStart(2, "0")} · ${nextView.categoryLabel}`;
+  updateCaseNavigation();
+  dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
+
+  const incomingAnimation = trackCaseSwitchAnimation(variableContent.animate([
+    { transform: `translate3d(${direction * distance}px,0,0)` },
+    { transform: "translate3d(0,0,0)" }
+  ], { duration: 155, easing: "cubic-bezier(.2,.75,.2,1)", fill: "both" }));
+  await incomingAnimation.finished.catch(() => {});
+  if (token !== caseSwitchToken || !dialog.open) return;
+  incomingAnimation.cancel();
+  finishCaseSwitch(direction);
 }
 
 function openCase(caseId) {
   const item = caseItems.find((entry) => entry.id === caseId);
   if (!item) return;
+  cancelContentSwitch();
   renderCase(item);
+  clearTimeout(dialogOpenTimer);
+  clearTimeout(dialogCloseTimer);
+  dialog.classList.remove("is-opening", "is-closing", "is-preparing");
+  if (!prefersReducedMotion()) dialog.classList.add("is-preparing");
   dialog.showModal();
   document.body.classList.add("dialog-open");
+  preloadAdjacentCaseVariant(1);
+
+  if (!prefersReducedMotion()) {
+    requestAnimationFrame(() => {
+      if (!dialog.open) return;
+      dialog.classList.remove("is-preparing");
+      dialog.classList.add("is-opening");
+      dialogOpenTimer = window.setTimeout(() => dialog.classList.remove("is-opening"), 520);
+    });
+  }
+}
+
+function finishDialogClose() {
+  clearTimeout(dialogCloseTimer);
+  dialogCloseTimer = 0;
+  dialog.classList.remove("is-opening", "is-closing", "is-preparing");
+  if (dialog.open) dialog.close();
+  document.body.classList.remove("dialog-open");
 }
 
 function closeDialog() {
+  if (!dialog.open || dialog.classList.contains("is-closing")) return;
   dialog.querySelectorAll("video").forEach((video) => video.pause());
-  dialog.close();
-  document.body.classList.remove("dialog-open");
+  cancelContentSwitch();
+  clearTimeout(dialogOpenTimer);
+  dialogOpenTimer = 0;
+
+  if (prefersReducedMotion()) {
+    finishDialogClose();
+    return;
+  }
+
+  dialog.classList.remove("is-opening", "is-preparing");
+  dialog.classList.add("is-closing");
+  dialogCloseTimer = window.setTimeout(finishDialogClose, 205);
 }
 
 document.querySelector(".dialog-close").addEventListener("click", closeDialog);
 dialog.addEventListener("click", (event) => { if (event.target === dialog) closeDialog(); });
-dialog.addEventListener("close", () => document.body.classList.remove("dialog-open"));
+dialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeDialog();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && dialog.open) {
+    event.preventDefault();
+    closeDialog();
+  }
+});
+dialog.addEventListener("close", () => {
+  clearTimeout(dialogOpenTimer);
+  clearTimeout(dialogCloseTimer);
+  cancelContentSwitch();
+  currentCaseState = null;
+  dialog.classList.remove("is-opening", "is-closing", "is-preparing");
+  document.body.classList.remove("dialog-open");
+});
 
 const filterButtons = document.querySelectorAll("[data-filter]");
-filterButtons.forEach((button) => button.addEventListener("click", () => {
+let activeFilter = "all";
+let renderedFilter = "all";
+let filterToken = 0;
+const filterTransitionAnimations = new Set();
+let filterTransitionLayers = [];
+let filterTransitionCards = [];
+let filterCleanupFrame = 0;
+let filterPreloadObserver = null;
+let filterPreloadStarted = false;
+
+function cardMatchesFilter(card, filter) {
+  return filter === "all" || card.dataset.category === filter;
+}
+
+function getPortfolioCards() {
+  return portfolioCards;
+}
+
+function getGridColumnCount() {
+  return Math.max(1, getComputedStyle(workGrid).gridTemplateColumns.split(" ").filter(Boolean).length);
+}
+
+function getFilterAnimationWindow(currentCards, nextCards) {
+  const visibleIndexes = [];
+  currentCards.forEach((card, index) => {
+    const rect = card.getBoundingClientRect();
+    if (rect.bottom > 0 && rect.top < window.innerHeight) visibleIndexes.push(index);
+  });
+  if (visibleIndexes.length === 0 || currentCards.length === 0) return null;
+
+  const columns = getGridColumnCount();
+  const firstRowHeight = Math.max(...currentCards.slice(0, columns).map((card) => card.getBoundingClientRect().height));
+  const rowGap = Number.parseFloat(getComputedStyle(workGrid).rowGap) || 0;
+  const rowSpan = firstRowHeight + rowGap;
+  const startRow = Math.floor(visibleIndexes[0] / columns);
+  const endRow = Math.floor(visibleIndexes[visibleIndexes.length - 1] / columns) + 1;
+  const startIndex = startRow * columns;
+  const endIndex = endRow * columns;
+  const incomingCards = nextCards.slice(startIndex, endIndex);
+  if (incomingCards.length === 0) return null;
+
+  const nextRows = Math.ceil(nextCards.length / columns);
+  const estimatedNextHeight = nextRows > 0 ? nextRows * firstRowHeight + Math.max(0, nextRows - 1) * rowGap : 0;
+  return {
+    incomingCards,
+    outgoingCards: currentCards.slice(startIndex, endIndex),
+    topOffset: startRow * rowSpan,
+    estimatedNextHeight
+  };
+}
+
+function clearFilterTransition() {
+  filterTransitionAnimations.forEach((animation) => animation.cancel());
+  filterTransitionAnimations.clear();
+  cancelAnimationFrame(filterCleanupFrame);
+  filterCleanupFrame = 0;
+  filterTransitionLayers.forEach((layer) => layer.remove());
+  filterTransitionLayers = [];
+  filterTransitionCards.forEach((card) => card.style.removeProperty("visibility"));
+  filterTransitionCards = [];
+  workGrid.classList.remove("is-filter-transitioning");
+  workGrid.style.removeProperty("min-height");
+}
+
+function applyFilter(filter) {
+  const insertionPoint = filterTransitionLayers.find((layer) => layer.parentElement === workGrid) ?? null;
+  Array.from(workGrid.children).filter((element) => element.classList.contains("work-card")).forEach((card) => card.remove());
+  getPortfolioCards().filter((card) => cardMatchesFilter(card, filter)).forEach((card) => {
+    card.hidden = false;
+    card.classList.add("is-visible");
+    workGrid.insertBefore(card, insertionPoint);
+  });
+  renderedFilter = filter;
+}
+
+function createFilterTransitionLayer(cards, topOffset, stateClass) {
+  const layer = document.createElement("div");
+  layer.className = `work-grid work-grid-transition-layer ${stateClass}`;
+  layer.setAttribute("aria-hidden", "true");
+  layer.setAttribute("inert", "");
+  layer.style.setProperty("top", `${topOffset}px`);
+  cards.forEach((card) => {
+    const clone = card.cloneNode(true);
+    clone.hidden = false;
+    clone.classList.add("is-visible");
+    clone.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+    clone.querySelectorAll("a, button, input, select, textarea, [tabindex]").forEach((element) => element.setAttribute("tabindex", "-1"));
+    clone.querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
+    layer.appendChild(clone);
+  });
+  return layer;
+}
+
+filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", async () => {
+  const nextFilter = button.dataset.filter;
+  if (nextFilter === activeFilter) return;
+  const currentButtonIndex = Array.from(filterButtons).findIndex((item) => item.dataset.filter === renderedFilter);
+  const direction = buttonIndex > currentButtonIndex ? 1 : -1;
+  activeFilter = nextFilter;
   filterButtons.forEach((item) => {
     const active = item === button;
     item.classList.toggle("is-active", active);
     item.setAttribute("aria-pressed", String(active));
   });
-  workGrid.querySelectorAll(".work-card").forEach((card) => {
-    card.hidden = button.dataset.filter !== "all" && card.dataset.category !== button.dataset.filter;
+
+  const token = ++filterToken;
+  clearFilterTransition();
+  if (nextFilter === renderedFilter) {
+    applyFilter(nextFilter);
+    return;
+  }
+
+  const cards = getPortfolioCards();
+  const nextCards = cards.filter((card) => cardMatchesFilter(card, nextFilter));
+  const currentCards = Array.from(workGrid.children).filter((element) => element.classList.contains("work-card"));
+  const animationWindow = getFilterAnimationWindow(currentCards, nextCards);
+  if (prefersReducedMotion() || typeof workGrid.animate !== "function" || !animationWindow) {
+    applyFilter(nextFilter);
+    return;
+  }
+
+  await prepareImages(getCardImageSources(animationWindow.incomingCards));
+  if (token !== filterToken) return;
+
+  const oldLayer = createFilterTransitionLayer(animationWindow.outgoingCards, animationWindow.topOffset, "is-leaving");
+  const nextLayer = createFilterTransitionLayer(animationWindow.incomingCards, animationWindow.topOffset, "is-entering");
+  oldLayer.style.visibility = "hidden";
+  nextLayer.style.visibility = "hidden";
+  workGrid.append(oldLayer, nextLayer);
+  const oldHeight = Math.ceil(workGrid.getBoundingClientRect().height);
+  const stableHeight = Math.max(oldHeight, Math.ceil(animationWindow.estimatedNextHeight));
+  workGrid.style.setProperty("min-height", `${stableHeight}px`);
+  workGrid.classList.add("is-filter-transitioning");
+  animationWindow.outgoingCards.forEach((card) => card.style.setProperty("visibility", "hidden"));
+  oldLayer.style.removeProperty("visibility");
+  nextLayer.style.removeProperty("visibility");
+  filterTransitionLayers = [oldLayer, nextLayer];
+  filterTransitionCards = animationWindow.outgoingCards;
+
+  const animationOptions = { duration: 260, easing: "cubic-bezier(.22,.72,.22,1)", fill: "both" };
+  const oldAnimation = oldLayer.animate([
+    { transform: "translate3d(0,0,0)" },
+    { transform: `translate3d(${-direction * 100}%,0,0)` }
+  ], animationOptions);
+  const nextAnimation = nextLayer.animate([
+    { transform: `translate3d(${direction * 100}%,0,0)` },
+    { transform: "translate3d(0,0,0)" }
+  ], animationOptions);
+  filterTransitionAnimations.add(oldAnimation);
+  filterTransitionAnimations.add(nextAnimation);
+  await Promise.all([oldAnimation, nextAnimation].map((animation) => animation.finished.catch(() => {})));
+  if (token !== filterToken) return;
+
+  applyFilter(nextFilter);
+  filterCleanupFrame = requestAnimationFrame(() => {
+    if (token !== filterToken) return;
+    clearFilterTransition();
   });
 }));
+
+function scheduleFilterPreload() {
+  if (filterPreloadStarted) return;
+  filterPreloadStarted = true;
+  const columns = getGridColumnCount();
+  const firstRowCards = Array.from(filterButtons).flatMap((button) => (
+    getPortfolioCards().filter((card) => cardMatchesFilter(card, button.dataset.filter)).slice(0, columns)
+  ));
+  prepareImages(getCardImageSources(Array.from(new Set(firstRowCards))));
+}
+
+function setupFilterPreload() {
+  if (!("IntersectionObserver" in window)) {
+    requestAnimationFrame(scheduleFilterPreload);
+    return;
+  }
+  filterPreloadObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    filterPreloadObserver.disconnect();
+    filterPreloadObserver = null;
+    scheduleFilterPreload();
+  }, { rootMargin: "650px 0px", threshold: 0 });
+  filterPreloadObserver.observe(document.querySelector("#works"));
+}
 
 const shortWordPattern = /(^|[\s\u00a0(«„"—–-])(в|во|и|а|но|к|ко|с|со|у|о|об|от|до|за|из|на|по|для|при)\s+(?=[^\s\u00a0])/gi;
 
@@ -310,7 +880,15 @@ document.querySelector("#year").textContent = new Date().getFullYear();
 
 function setupReveal() {
   const elements = document.querySelectorAll(".reveal");
-  if (!("IntersectionObserver" in window)) {
+  [".statement-grid", ".section-head", ".work-grid", ".capability-grid", ".timeline", ".contact-cards"].forEach((selector) => {
+    document.querySelectorAll(selector).forEach((group) => {
+      Array.from(group.children).filter((child) => child.classList.contains("reveal")).forEach((element, index) => {
+        element.style.setProperty("--reveal-delay", `${Math.min(index * 65, 300)}ms`);
+      });
+    });
+  });
+
+  if (prefersReducedMotion() || !("IntersectionObserver" in window)) {
     elements.forEach((element) => element.classList.add("is-visible"));
     return;
   }
@@ -321,10 +899,26 @@ function setupReveal() {
         revealObserver.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.08 });
+  }, { threshold: 0.08, rootMargin: "0px 0px -6% 0px" });
   elements.forEach((element) => revealObserver.observe(element));
 }
 
+function handleReducedMotionChange() {
+  if (!prefersReducedMotion()) return;
+  workGrid.querySelectorAll(".work-collage").forEach(resetCardTilt);
+  filterToken += 1;
+  clearFilterTransition();
+  applyFilter(activeFilter);
+  cancelContentSwitch();
+  document.querySelectorAll(".reveal").forEach((element) => element.classList.add("is-visible"));
+  if (dialog.classList.contains("is-closing")) finishDialogClose();
+  if (dialog.open) dialog.classList.remove("is-opening", "is-preparing");
+}
+
+if (typeof reducedMotion.addEventListener === "function") reducedMotion.addEventListener("change", handleReducedMotionChange);
+else if (typeof reducedMotion.addListener === "function") reducedMotion.addListener(handleReducedMotionChange);
+
 renderCards();
+setupFilterPreload();
 processTypography(document.body);
 setupReveal();
