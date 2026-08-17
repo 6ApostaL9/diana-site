@@ -190,12 +190,7 @@ const richCases = caseItems.filter((item) => item.type === "rich");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
 const preparedImagePromises = new Map();
-const scheduleIdleCallback = typeof window.requestIdleCallback === "function"
-  ? (callback) => window.requestIdleCallback(callback, { timeout: 1400 })
-  : (callback) => window.setTimeout(() => callback({ didTimeout: true, timeRemaining: () => 0 }), 700);
-const cancelScheduledIdleCallback = typeof window.cancelIdleCallback === "function"
-  ? (handle) => window.cancelIdleCallback(handle)
-  : (handle) => window.clearTimeout(handle);
+const preparedImageSources = new Set();
 
 function prefersReducedMotion() {
   return reducedMotion.matches;
@@ -237,6 +232,7 @@ function prepareImageSource(source) {
       settled = true;
       image.onload = null;
       image.onerror = null;
+      preparedImageSources.add(source);
       resolve();
     }
 
@@ -260,6 +256,10 @@ function prepareImageSource(source) {
 
 function prepareImages(sources) {
   return Promise.all(Array.from(new Set(sources)).map(prepareImageSource));
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
 function getCardImageSources(cards) {
@@ -401,16 +401,17 @@ let caseSwitchToken = 0;
 let caseSwitching = false;
 let activeCaseTargetIndex = null;
 let queuedCaseIndex = null;
-let caseIdleHandle = 0;
-let caseIdleGeneration = 0;
+let casePreloadGeneration = 0;
 const caseSwitchAnimations = new Set();
 
-function setCaseBusy(busy) {
+function setCaseBusy(busy, direction = 0) {
   const navigation = dialogContent.querySelector(".case-variant-navigation");
   const viewport = dialogContent.querySelector(".case-variant-viewport");
   navigation?.classList.toggle("is-busy", busy);
   navigation?.setAttribute("aria-busy", String(busy));
   viewport?.setAttribute("aria-busy", String(busy));
+  if (busy && direction) navigation?.setAttribute("data-busy-direction", String(direction));
+  else navigation?.removeAttribute("data-busy-direction");
 }
 
 function updateCaseNavigation() {
@@ -441,46 +442,47 @@ function applyCaseVariant(index) {
   return view;
 }
 
-function getCriticalCaseImageSources(view) {
-  if (!view.images.length) return [];
-  const currentImages = Array.from(dialogContent.querySelectorAll(".case-variant-content:not(.is-pending) .dialog-gallery img"));
+function getCriticalCaseImageSource(view) {
+  if (!view.images.length) return null;
+  const currentImages = Array.from(dialogContent.querySelectorAll(".case-variant-content .dialog-gallery img"));
   const dialogRect = dialog.getBoundingClientRect();
   const firstVisibleIndex = currentImages.findIndex((image) => {
     const rect = image.getBoundingClientRect();
     return rect.bottom > dialogRect.top && rect.top < dialogRect.bottom;
   });
   const startIndex = firstVisibleIndex >= 0 ? firstVisibleIndex : 0;
-  return view.images.slice(startIndex, startIndex + 2);
+  return view.images[startIndex] ?? view.images[0];
 }
 
-function cancelCaseIdlePreload() {
-  caseIdleGeneration += 1;
-  if (caseIdleHandle) cancelScheduledIdleCallback(caseIdleHandle);
-  caseIdleHandle = 0;
+function buildCaseVariantFragment(view) {
+  const template = document.createElement("template");
+  template.innerHTML = renderCaseVariant(view);
+  processTypography(template.content);
+  return template.content;
 }
 
-function scheduleAdjacentCasePreload() {
-  cancelCaseIdlePreload();
+function cancelCasePreload() {
+  casePreloadGeneration += 1;
+}
+
+function preloadAdjacentCaseVariant(direction = 1) {
+  cancelCasePreload();
   if (!currentCaseState || currentCaseState.variants.length < 2 || !dialog.open) return;
-  const generation = caseIdleGeneration;
-  const neighborIndexes = [currentCaseState.index + 1, currentCaseState.index - 1]
-    .filter((index) => index >= 0 && index < currentCaseState.variants.length);
-  const warmNextNeighbor = () => {
-    const index = neighborIndexes.shift();
-    if (index === undefined || generation !== caseIdleGeneration || !dialog.open) {
-      caseIdleHandle = 0;
-      return;
-    }
-    caseIdleHandle = scheduleIdleCallback(() => {
-      if (generation !== caseIdleGeneration || !dialog.open || !currentCaseState) return;
-      const view = getCaseVariantView(currentCaseState, index);
-      prepareImages(view.images.slice(0, 1)).finally(warmNextNeighbor);
-    });
-  };
-  warmNextNeighbor();
+  const preferredIndex = currentCaseState.index + direction;
+  const fallbackIndex = currentCaseState.index - direction;
+  const targetIndex = preferredIndex >= 0 && preferredIndex < currentCaseState.variants.length
+    ? preferredIndex
+    : fallbackIndex;
+  if (targetIndex < 0 || targetIndex >= currentCaseState.variants.length) return;
+  const generation = casePreloadGeneration;
+  const source = getCaseVariantView(currentCaseState, targetIndex).images[0];
+  if (!source) return;
+  prepareImageSource(source).then(() => {
+    if (generation !== casePreloadGeneration || !dialog.open) return;
+  });
 }
 
-function finishCaseSwitch() {
+function finishCaseSwitch(direction) {
   caseSwitching = false;
   activeCaseTargetIndex = null;
   const nextQueuedIndex = queuedCaseIndex;
@@ -490,22 +492,20 @@ function finishCaseSwitch() {
     return;
   }
   setCaseBusy(false);
-  scheduleAdjacentCasePreload();
+  preloadAdjacentCaseVariant(direction);
 }
 
 function cancelContentSwitch() {
   caseSwitchToken += 1;
-  cancelCaseIdlePreload();
+  cancelCasePreload();
   caseSwitchAnimations.forEach((animation) => animation.cancel());
   caseSwitchAnimations.clear();
   caseSwitching = false;
   activeCaseTargetIndex = null;
   queuedCaseIndex = null;
   setCaseBusy(false);
-  const track = dialogContent.querySelector(".case-variant-track");
-  track?.querySelectorAll(".case-variant-content.is-pending").forEach((content) => content.remove());
-  track?.style.removeProperty("transform");
-  track?.style.removeProperty("will-change");
+  const variableContent = dialogContent.querySelector(".case-variant-content");
+  variableContent?.style.removeProperty("transform");
 }
 
 function trackCaseSwitchAnimation(animation) {
@@ -516,7 +516,7 @@ function trackCaseSwitchAnimation(animation) {
 
 function renderCase(item) {
   currentCaseState = createCaseState(item);
-  dialogContent.innerHTML = `${renderCaseNavigation(currentCaseState)}<div class="case-variant-viewport" aria-busy="false"><div class="case-variant-track"><div class="case-variant-content"></div></div></div>`;
+  dialogContent.innerHTML = `${renderCaseNavigation(currentCaseState)}<div class="case-variant-viewport" aria-busy="false"><div class="case-variant-content"></div></div>`;
   applyCaseVariant(currentCaseState.index);
   dialogContent.querySelectorAll("[data-case-step]").forEach((button) => button.addEventListener("click", () => {
     if (!currentCaseState) return;
@@ -536,64 +536,58 @@ async function switchCaseVariant(nextIndex, direction) {
   if (!currentCaseState || caseSwitching) return;
   caseSwitching = true;
   activeCaseTargetIndex = nextIndex;
-  setCaseBusy(true);
+  setCaseBusy(true, direction);
+  cancelCasePreload();
   clearTimeout(dialogOpenTimer);
   dialogOpenTimer = 0;
   dialog.classList.remove("is-opening", "is-preparing");
   const token = ++caseSwitchToken;
   const nextView = getCaseVariantView(currentCaseState, nextIndex);
-  await prepareImages(getCriticalCaseImageSources(nextView));
+  const criticalSource = getCriticalCaseImageSource(nextView);
+  if (criticalSource && !preparedImageSources.has(criticalSource)) await prepareImageSource(criticalSource);
+  if (!prefersReducedMotion()) await nextAnimationFrame();
   if (token !== caseSwitchToken || !dialog.open) return;
 
-  const track = dialogContent.querySelector(".case-variant-track");
-  const variableContent = track?.querySelector(".case-variant-content");
-  if (!track || !variableContent) {
-    finishCaseSwitch();
+  const variableContent = dialogContent.querySelector(".case-variant-content");
+  if (!variableContent) {
+    finishCaseSwitch(direction);
     return;
   }
   const previousScroll = dialog.scrollTop;
 
-  if (prefersReducedMotion() || typeof track.animate !== "function") {
+  if (prefersReducedMotion() || typeof variableContent.animate !== "function") {
     dialog.querySelectorAll("video").forEach((video) => video.pause());
     applyCaseVariant(nextIndex);
     dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
-    finishCaseSwitch();
+    finishCaseSwitch(direction);
     return;
   }
 
-  const nextContent = document.createElement("div");
-  nextContent.className = "case-variant-content is-pending";
-  nextContent.setAttribute("aria-hidden", "true");
-  nextContent.setAttribute("inert", "");
-  nextContent.innerHTML = renderCaseVariant(nextView, "dialog-title-next");
-  processTypography(nextContent);
-  if (direction > 0) track.appendChild(nextContent);
-  else track.insertBefore(nextContent, variableContent);
-  track.style.setProperty("will-change", "transform");
-
-  const startPosition = direction > 0 ? "translate3d(0,0,0)" : "translate3d(-100%,0,0)";
-  const endPosition = direction > 0 ? "translate3d(-100%,0,0)" : "translate3d(0,0,0)";
-  const slideAnimation = trackCaseSwitchAnimation(track.animate([
-    { transform: startPosition },
-    { transform: endPosition }
-  ], { duration: 320, easing: "cubic-bezier(.22,.72,.22,1)", fill: "forwards" }));
-  await slideAnimation.finished.catch(() => {});
+  const nextFragment = buildCaseVariantFragment(nextView);
+  const distance = 28;
+  const outgoingAnimation = trackCaseSwitchAnimation(variableContent.animate([
+    { transform: "translate3d(0,0,0)" },
+    { transform: `translate3d(${-direction * distance}px,0,0)` }
+  ], { duration: 100, easing: "cubic-bezier(.4,0,.8,.4)", fill: "both" }));
+  await outgoingAnimation.finished.catch(() => {});
   if (token !== caseSwitchToken || !dialog.open) return;
 
-  slideAnimation.cancel();
+  outgoingAnimation.cancel();
   dialog.querySelectorAll("video").forEach((video) => video.pause());
-  track.replaceChildren(nextContent);
-  nextContent.classList.remove("is-pending");
-  nextContent.removeAttribute("aria-hidden");
-  nextContent.removeAttribute("inert");
-  nextContent.querySelector("#dialog-title-next")?.setAttribute("id", "dialog-title");
-  track.style.removeProperty("will-change");
-  track.style.removeProperty("transform");
+  variableContent.replaceChildren(nextFragment);
   currentCaseState.index = nextIndex;
   dialogKicker.textContent = `Кейс ${String(nextView.number).padStart(2, "0")} · ${nextView.categoryLabel}`;
   updateCaseNavigation();
   dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
-  finishCaseSwitch();
+
+  const incomingAnimation = trackCaseSwitchAnimation(variableContent.animate([
+    { transform: `translate3d(${direction * distance}px,0,0)` },
+    { transform: "translate3d(0,0,0)" }
+  ], { duration: 155, easing: "cubic-bezier(.2,.75,.2,1)", fill: "both" }));
+  await incomingAnimation.finished.catch(() => {});
+  if (token !== caseSwitchToken || !dialog.open) return;
+  incomingAnimation.cancel();
+  finishCaseSwitch(direction);
 }
 
 function openCase(caseId) {
@@ -607,7 +601,7 @@ function openCase(caseId) {
   if (!prefersReducedMotion()) dialog.classList.add("is-preparing");
   dialog.showModal();
   document.body.classList.add("dialog-open");
-  scheduleAdjacentCasePreload();
+  preloadAdjacentCaseVariant(1);
 
   if (!prefersReducedMotion()) {
     requestAnimationFrame(() => {
@@ -667,12 +661,14 @@ dialog.addEventListener("close", () => {
 
 const filterButtons = document.querySelectorAll("[data-filter]");
 let activeFilter = "all";
+let renderedFilter = "all";
 let filterToken = 0;
 const filterTransitionAnimations = new Set();
-let filterTransitionLayer = null;
+let filterTransitionLayers = [];
 let filterTransitionCards = [];
 let filterCleanupFrame = 0;
-let filterIdleHandle = 0;
+let filterPreloadObserver = null;
+let filterPreloadStarted = false;
 
 function cardMatchesFilter(card, filter) {
   return filter === "all" || card.dataset.category === filter;
@@ -687,21 +683,19 @@ function getGridColumnCount() {
 }
 
 function getFilterAnimationWindow(currentCards, nextCards) {
-  const gridRect = workGrid.getBoundingClientRect();
-  const hasVisibleCard = currentCards.some((card) => {
+  const visibleIndexes = [];
+  currentCards.forEach((card, index) => {
     const rect = card.getBoundingClientRect();
-    return rect.bottom > 0 && rect.top < window.innerHeight;
+    if (rect.bottom > 0 && rect.top < window.innerHeight) visibleIndexes.push(index);
   });
-  if (!hasVisibleCard || currentCards.length === 0) return null;
+  if (visibleIndexes.length === 0 || currentCards.length === 0) return null;
 
   const columns = getGridColumnCount();
   const firstRowHeight = Math.max(...currentCards.slice(0, columns).map((card) => card.getBoundingClientRect().height));
   const rowGap = Number.parseFloat(getComputedStyle(workGrid).rowGap) || 0;
   const rowSpan = firstRowHeight + rowGap;
-  const visibleTop = Math.max(0, -gridRect.top);
-  const visibleBottom = Math.max(0, window.innerHeight - gridRect.top);
-  const startRow = Math.max(0, Math.floor(visibleTop / rowSpan) - 1);
-  const endRow = Math.max(startRow + 1, Math.ceil(visibleBottom / rowSpan) + 1);
+  const startRow = Math.floor(visibleIndexes[0] / columns);
+  const endRow = Math.floor(visibleIndexes[visibleIndexes.length - 1] / columns) + 1;
   const startIndex = startRow * columns;
   const endIndex = endRow * columns;
   const incomingCards = nextCards.slice(startIndex, endIndex);
@@ -722,27 +716,28 @@ function clearFilterTransition() {
   filterTransitionAnimations.clear();
   cancelAnimationFrame(filterCleanupFrame);
   filterCleanupFrame = 0;
-  filterTransitionLayer?.remove();
-  filterTransitionLayer = null;
-  filterTransitionCards.forEach((card) => card.style.removeProperty("will-change"));
+  filterTransitionLayers.forEach((layer) => layer.remove());
+  filterTransitionLayers = [];
+  filterTransitionCards.forEach((card) => card.style.removeProperty("visibility"));
   filterTransitionCards = [];
   workGrid.classList.remove("is-filter-transitioning");
   workGrid.style.removeProperty("min-height");
 }
 
 function applyFilter(filter) {
-  const insertionPoint = filterTransitionLayer?.parentElement === workGrid ? filterTransitionLayer : null;
+  const insertionPoint = filterTransitionLayers.find((layer) => layer.parentElement === workGrid) ?? null;
   Array.from(workGrid.children).filter((element) => element.classList.contains("work-card")).forEach((card) => card.remove());
   getPortfolioCards().filter((card) => cardMatchesFilter(card, filter)).forEach((card) => {
     card.hidden = false;
     card.classList.add("is-visible");
     workGrid.insertBefore(card, insertionPoint);
   });
+  renderedFilter = filter;
 }
 
-function createFilterTransitionLayer(cards, topOffset) {
+function createFilterTransitionLayer(cards, topOffset, stateClass) {
   const layer = document.createElement("div");
-  layer.className = "work-grid work-grid-transition-layer is-entering";
+  layer.className = `work-grid work-grid-transition-layer ${stateClass}`;
   layer.setAttribute("aria-hidden", "true");
   layer.setAttribute("inert", "");
   layer.style.setProperty("top", `${topOffset}px`);
@@ -761,7 +756,7 @@ function createFilterTransitionLayer(cards, topOffset) {
 filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", async () => {
   const nextFilter = button.dataset.filter;
   if (nextFilter === activeFilter) return;
-  const currentButtonIndex = Array.from(filterButtons).findIndex((item) => item.dataset.filter === activeFilter);
+  const currentButtonIndex = Array.from(filterButtons).findIndex((item) => item.dataset.filter === renderedFilter);
   const direction = buttonIndex > currentButtonIndex ? 1 : -1;
   activeFilter = nextFilter;
   filterButtons.forEach((item) => {
@@ -772,6 +767,10 @@ filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", 
 
   const token = ++filterToken;
   clearFilterTransition();
+  if (nextFilter === renderedFilter) {
+    applyFilter(nextFilter);
+    return;
+  }
 
   const cards = getPortfolioCards();
   const nextCards = cards.filter((card) => cardMatchesFilter(card, nextFilter));
@@ -785,31 +784,33 @@ filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", 
   await prepareImages(getCardImageSources(animationWindow.incomingCards));
   if (token !== filterToken) return;
 
-  const nextLayer = createFilterTransitionLayer(animationWindow.incomingCards, animationWindow.topOffset);
+  const oldLayer = createFilterTransitionLayer(animationWindow.outgoingCards, animationWindow.topOffset, "is-leaving");
+  const nextLayer = createFilterTransitionLayer(animationWindow.incomingCards, animationWindow.topOffset, "is-entering");
+  oldLayer.style.visibility = "hidden";
   nextLayer.style.visibility = "hidden";
-  workGrid.appendChild(nextLayer);
+  workGrid.append(oldLayer, nextLayer);
   const oldHeight = Math.ceil(workGrid.getBoundingClientRect().height);
   const stableHeight = Math.max(oldHeight, Math.ceil(animationWindow.estimatedNextHeight));
   workGrid.style.setProperty("min-height", `${stableHeight}px`);
   workGrid.classList.add("is-filter-transitioning");
+  animationWindow.outgoingCards.forEach((card) => card.style.setProperty("visibility", "hidden"));
+  oldLayer.style.removeProperty("visibility");
   nextLayer.style.removeProperty("visibility");
-  filterTransitionLayer = nextLayer;
+  filterTransitionLayers = [oldLayer, nextLayer];
   filterTransitionCards = animationWindow.outgoingCards;
-  filterTransitionCards.forEach((card) => card.style.setProperty("will-change", "transform"));
 
-  const animationOptions = { duration: 320, easing: "cubic-bezier(.22,.72,.22,1)", fill: "both" };
-  const outgoingDistance = -direction * (workGrid.clientWidth + 24);
-  const outgoingAnimations = filterTransitionCards.map((card) => card.animate([
+  const animationOptions = { duration: 260, easing: "cubic-bezier(.22,.72,.22,1)", fill: "both" };
+  const oldAnimation = oldLayer.animate([
     { transform: "translate3d(0,0,0)" },
-    { transform: `translate3d(${outgoingDistance}px,0,0)` }
-  ], animationOptions));
+    { transform: `translate3d(${-direction * 100}%,0,0)` }
+  ], animationOptions);
   const nextAnimation = nextLayer.animate([
     { transform: `translate3d(${direction * 100}%,0,0)` },
     { transform: "translate3d(0,0,0)" }
   ], animationOptions);
-  outgoingAnimations.forEach((animation) => filterTransitionAnimations.add(animation));
+  filterTransitionAnimations.add(oldAnimation);
   filterTransitionAnimations.add(nextAnimation);
-  await Promise.all([...outgoingAnimations, nextAnimation].map((animation) => animation.finished.catch(() => {})));
+  await Promise.all([oldAnimation, nextAnimation].map((animation) => animation.finished.catch(() => {})));
   if (token !== filterToken) return;
 
   applyFilter(nextFilter);
@@ -820,23 +821,28 @@ filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", 
 }));
 
 function scheduleFilterPreload() {
-  if (filterIdleHandle) cancelScheduledIdleCallback(filterIdleHandle);
-  const filters = Array.from(filterButtons, (button) => button.dataset.filter).filter((filter) => filter !== activeFilter);
-  const warmNextFilter = () => {
-    const filter = filters.shift();
-    if (!filter) {
-      filterIdleHandle = 0;
-      return;
-    }
-    filterIdleHandle = scheduleIdleCallback(() => {
-      const firstRowCards = getPortfolioCards().filter((card) => cardMatchesFilter(card, filter)).slice(0, getGridColumnCount());
-      prepareImages(getCardImageSources(firstRowCards)).finally(warmNextFilter);
-    });
-  };
-  warmNextFilter();
+  if (filterPreloadStarted) return;
+  filterPreloadStarted = true;
+  const columns = getGridColumnCount();
+  const firstRowCards = Array.from(filterButtons).flatMap((button) => (
+    getPortfolioCards().filter((card) => cardMatchesFilter(card, button.dataset.filter)).slice(0, columns)
+  ));
+  prepareImages(getCardImageSources(Array.from(new Set(firstRowCards))));
 }
 
-window.addEventListener("load", scheduleFilterPreload, { once: true });
+function setupFilterPreload() {
+  if (!("IntersectionObserver" in window)) {
+    requestAnimationFrame(scheduleFilterPreload);
+    return;
+  }
+  filterPreloadObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    filterPreloadObserver.disconnect();
+    filterPreloadObserver = null;
+    scheduleFilterPreload();
+  }, { rootMargin: "650px 0px", threshold: 0 });
+  filterPreloadObserver.observe(document.querySelector("#works"));
+}
 
 const shortWordPattern = /(^|[\s\u00a0(«„"—–-])(в|во|и|а|но|к|ко|с|со|у|о|об|от|до|за|из|на|по|для|при)\s+(?=[^\s\u00a0])/gi;
 
@@ -913,5 +919,6 @@ if (typeof reducedMotion.addEventListener === "function") reducedMotion.addEvent
 else if (typeof reducedMotion.addListener === "function") reducedMotion.addListener(handleReducedMotionChange);
 
 renderCards();
+setupFilterPreload();
 processTypography(document.body);
 setupReveal();
