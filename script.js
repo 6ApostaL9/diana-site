@@ -20,6 +20,58 @@ const product = (label, caseSlug, productIndex, count, color) => ({
   )
 });
 
+function pluralizeRussian(number, forms) {
+  const lastTwoDigits = number % 100;
+  const lastDigit = number % 10;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return forms[2];
+  if (lastDigit === 1) return forms[0];
+  if (lastDigit >= 2 && lastDigit <= 4) return forms[1];
+  return forms[2];
+}
+
+const aiCase = (caseIndex, resultCount, hasSource = true, sourceAspectRatio = .75) => {
+  const caseNumber = String(caseIndex).padStart(2, "0");
+  const directory = `assets/portfolio/ai/ai-${caseNumber}`;
+  const resultLabel = `${resultCount} ${pluralizeRussian(resultCount, ["готовая работа", "готовые работы", "готовых работ"])}`;
+  const coverIndexes = resultCount === 2 ? [1, 2] : [1, Math.ceil(resultCount / 2), resultCount];
+  const media = [
+    ...(hasSource ? [{ src: `${directory}/source.webp`, isSource: true, aspectRatio: sourceAspectRatio }] : []),
+    ...assetSequence(directory, resultCount).map((src) => ({ src, isSource: false }))
+  ];
+
+  return {
+    id: `ai-${caseNumber}`, number: 13 + caseIndex, category: "ai", categoryLabel: "AI-контент", type: "ai",
+    title: `AI-контент ${caseNumber}`,
+    intro: hasSource
+      ? `Исходное изображение и ${resultLabel} собраны в одну последовательную галерею.`
+      : `${resultLabel} собраны в одну последовательную галерею.`,
+    description: hasSource
+      ? `Исходник и ${resultLabel} в последовательной галерее AI-контента.`
+      : `${resultLabel} в последовательной галерее AI-контента.`,
+    color: "#9d87f5", background: "#24232b",
+    coverVariant: "ai",
+    coverImages: coverIndexes.map((index) => assetImage(directory, index)),
+    details: [["Формат", "AI-контент"], ["Материал", hasSource ? `Исходник и ${resultLabel}` : resultLabel], ["Подача", "Последовательная галерея"]],
+    hasSource,
+    resultCount,
+    media
+  };
+};
+
+const aiCases = [
+  aiCase(1, 3),
+  aiCase(2, 5),
+  aiCase(3, 3),
+  aiCase(4, 5, false),
+  aiCase(5, 3, true, 1),
+  aiCase(6, 2),
+  aiCase(7, 2),
+  aiCase(8, 2),
+  aiCase(9, 4),
+  aiCase(10, 2),
+  aiCase(11, 4)
+];
+
 const caseItems = [
   {
     id: "auto-cosmetics", number: 1, category: "infographic", categoryLabel: "Инфографика", type: "infographic",
@@ -178,7 +230,8 @@ const caseItems = [
     coverImages: [1, 6, 10].map((index) => `assets/portfolio/banners/banner-${String(index).padStart(2, "0")}.webp`),
     details: [["Формат", "Медийные баннеры 900 × 450"], ["Материал", "10 рекламных сюжетов"], ["Подача", "Продукт, предложение и визуальный акцент"]],
     images: Array.from({ length: 10 }, (_, index) => `assets/portfolio/banners/banner-${String(index + 1).padStart(2, "0")}.webp`)
-  }
+  },
+  ...aiCases
 ];
 
 const workGrid = document.querySelector("#work-grid");
@@ -196,17 +249,12 @@ function prefersReducedMotion() {
   return reducedMotion.matches;
 }
 
-function pluralizeRussian(number, forms) {
-  const lastTwoDigits = number % 100;
-  const lastDigit = number % 10;
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return forms[2];
-  if (lastDigit === 1) return forms[0];
-  if (lastDigit >= 2 && lastDigit <= 4) return forms[1];
-  return forms[2];
-}
-
 function renderPreview(item) {
-  const count = item.type === "video" ? "3 видео" : item.type === "banners" ? "10 баннеров" : item.type === "rich" ? `${item.images.length} модулей` : `${item.products.length} ${pluralizeRussian(item.products.length, ["товар", "товара", "товаров"])}`;
+  let count = `${item.products?.length ?? 0} ${pluralizeRussian(item.products?.length ?? 0, ["товар", "товара", "товаров"])}`;
+  if (item.type === "video") count = "3 видео";
+  if (item.type === "banners") count = "10 баннеров";
+  if (item.type === "rich") count = `${item.images.length} модулей`;
+  if (item.type === "ai") count = `${item.resultCount} ${pluralizeRussian(item.resultCount, ["работа", "работы", "работ"])}`;
   return `<div class="work-collage work-collage-${item.type} cover-${item.coverVariant}" style="--case-bg: ${item.background}; --cover-accent: ${item.color}"><div class="cover-stage" aria-hidden="true">${item.coverImages.map((image, index) => `<span class="cover-panel cover-panel-${index + 1}"><img src="${image}" alt="" loading="lazy" decoding="async"></span>`).join("")}</div><span class="preview-count">${count}</span></div>`;
 }
 
@@ -348,13 +396,15 @@ function getCaseVariantView(state, index = state.index) {
   if (state.type === "product") {
     const variant = state.variants[index];
     const item = state.rootItem;
+    const media = variant.media ?? variant.images.map((src) => ({ src, isSource: false }));
     return {
       item,
       index,
       title: variant.title ?? item.title,
       intro: variant.intro ?? variant.description ?? item.intro,
       details: variant.details ?? item.details,
-      images: variant.images,
+      images: media.map((mediaItem) => mediaItem.src),
+      media,
       videos: null,
       galleryType: item.type,
       number: variant.number ?? item.number,
@@ -363,13 +413,15 @@ function getCaseVariantView(state, index = state.index) {
   }
 
   const item = state.type === "rich" ? state.variants[index] : state.rootItem;
+  const media = item.media ?? (item.images ?? []).map((src) => ({ src, isSource: false }));
   return {
     item,
     index,
     title: item.title,
     intro: item.intro,
     details: item.details,
-    images: item.images ?? [],
+    images: media.map((mediaItem) => mediaItem.src),
+    media,
     videos: item.videos ?? null,
     galleryType: item.type,
     number: item.number,
@@ -381,7 +433,12 @@ function renderVariantGallery(view) {
   if (view.videos) {
     return view.videos.map((video, index) => `<figure class="dialog-video"><video src="${video.src}" poster="${video.poster}" controls muted loop playsinline preload="metadata" aria-label="Видеообложка ${index + 1}"></video><figcaption>Видеообложка ${String(index + 1).padStart(2, "0")}</figcaption></figure>`).join("");
   }
-  return view.images.map((image, index) => `<img src="${image}" alt="${view.title} — слайд ${index + 1}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`).join("");
+  return view.media.map((mediaItem, index) => {
+    const resultNumber = view.media.slice(0, index + 1).filter((item) => !item.isSource).length;
+    const image = `<img src="${mediaItem.src}" alt="${view.title} — ${mediaItem.isSource ? "исходник" : `работа ${resultNumber}`}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`;
+    if (!mediaItem.isSource) return image;
+    return `<figure class="dialog-media-source" style="--media-ratio: ${mediaItem.aspectRatio}">${image}<figcaption class="source-badge">исходник</figcaption></figure>`;
+  }).join("");
 }
 
 function renderCaseVariant(view, titleId = "dialog-title") {
