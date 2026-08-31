@@ -242,11 +242,32 @@ let portfolioCards = [];
 const richCases = caseItems.filter((item) => item.type === "rich");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
-const preparedImagePromises = new Map();
+const imagePreparationTasks = new Map();
 const preparedImageSources = new Set();
+const criticalImagePreparationQueue = [];
+const backgroundImagePreparationQueue = [];
+const imagePreparationLimit = 2;
+let activeImagePreparations = 0;
+let activeBackgroundImagePreparations = 0;
+let portfolioInitialized = false;
+let revealObserver = null;
+let dialogGalleryObserver = null;
+let dialogGalleryPriorityFrame = 0;
+let cardCoverObserver = null;
+let activeTiltBoundsUpdate = null;
+const cardCoverTasks = new Map();
+const criticalCardCoverQueue = [];
+const backgroundCardCoverQueue = [];
+const cardCoverHydrationLimit = 2;
+let activeCardCoverHydrations = 0;
+let activeBackgroundCardCoverHydrations = 0;
 
 function prefersReducedMotion() {
   return reducedMotion.matches;
+}
+
+function previewImageSource(source) {
+  return source.replace("assets/portfolio/", "assets/portfolio/covers/");
 }
 
 function renderPreview(item) {
@@ -255,7 +276,8 @@ function renderPreview(item) {
   if (item.type === "banners") count = "10 баннеров";
   if (item.type === "rich") count = `${item.images.length} модулей`;
   if (item.type === "ai") count = `${item.resultCount} ${pluralizeRussian(item.resultCount, ["работа", "работы", "работ"])}`;
-  return `<div class="work-collage work-collage-${item.type} cover-${item.coverVariant}" style="--case-bg: ${item.background}; --cover-accent: ${item.color}"><div class="cover-stage" aria-hidden="true">${item.coverImages.map((image, index) => `<span class="cover-panel cover-panel-${index + 1}"><img src="${image}" alt="" loading="lazy" decoding="async"></span>`).join("")}</div><span class="preview-count">${count}</span></div>`;
+  const height = item.type === "banners" ? 450 : 1200;
+  return `<div class="work-collage work-collage-${item.type} cover-${item.coverVariant}" style="--case-bg: ${item.background}; --cover-accent: ${item.color}"><div class="cover-stage" aria-hidden="true">${item.coverImages.map((image, index) => `<span class="cover-panel cover-panel-${index + 1}"><span class="cover-image-placeholder" data-src="${previewImageSource(image)}" data-width="900" data-height="${height}"></span></span>`).join("")}</div><span class="preview-count">${count}</span></div>`;
 }
 
 function renderArrow(direction) {
@@ -267,58 +289,173 @@ function renderArrow(direction) {
   return `<svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[direction]}</svg>`;
 }
 
-function prepareImageSource(source) {
+function prepareImageSource(source, { priority = "background" } = {}) {
   if (!source) return Promise.resolve();
-  if (preparedImagePromises.has(source)) return preparedImagePromises.get(source);
+  const existingTask = imagePreparationTasks.get(source);
+  if (existingTask) {
+    if (priority === "critical" && !existingTask.started && existingTask.priority !== "critical") {
+      const index = backgroundImagePreparationQueue.indexOf(existingTask);
+      if (index >= 0) backgroundImagePreparationQueue.splice(index, 1);
+      existingTask.priority = "critical";
+      criticalImagePreparationQueue.unshift(existingTask);
+      runImagePreparationQueue();
+    }
+    return existingTask.promise;
+  }
 
-  const preparation = new Promise((resolve) => {
+  let resolvePreparation;
+  const preparation = new Promise((resolve) => { resolvePreparation = resolve; });
+  const task = { source, resolve: resolvePreparation, promise: preparation, priority, started: false };
+  imagePreparationTasks.set(source, task);
+  (priority === "critical" ? criticalImagePreparationQueue : backgroundImagePreparationQueue).push(task);
+  runImagePreparationQueue();
+  return preparation;
+}
+
+function runImagePreparationQueue() {
+  while (activeImagePreparations < imagePreparationLimit) {
+    const task = criticalImagePreparationQueue.shift()
+      ?? (activeBackgroundImagePreparations < 1 ? backgroundImagePreparationQueue.shift() : null);
+    if (!task) break;
+    const { source, resolve, priority } = task;
+    task.started = true;
+    activeImagePreparations += 1;
+    if (priority === "background") activeBackgroundImagePreparations += 1;
     const image = new Image();
     let settled = false;
-
-    function finish() {
+    const finish = () => {
       if (settled) return;
       settled = true;
       image.onload = null;
       image.onerror = null;
       preparedImageSources.add(source);
+      activeImagePreparations -= 1;
+      if (priority === "background") activeBackgroundImagePreparations -= 1;
       resolve();
-    }
-
-    function decodeAndFinish() {
-      if (typeof image.decode !== "function") {
-        finish();
-        return;
-      }
+      runImagePreparationQueue();
+    };
+    const decodeAndFinish = () => {
+      if (typeof image.decode !== "function") return finish();
       image.decode().catch(() => {}).finally(finish);
-    }
-
+    };
     image.decoding = "async";
     image.onload = decodeAndFinish;
     image.onerror = finish;
     image.src = source;
     if (image.complete) queueMicrotask(image.naturalWidth ? decodeAndFinish : finish);
-  });
-  preparedImagePromises.set(source, preparation);
-  return preparation;
+  }
 }
 
-function prepareImages(sources) {
-  return Promise.all(Array.from(new Set(sources)).map(prepareImageSource));
-}
-
-function nextAnimationFrame() {
-  return new Promise((resolve) => requestAnimationFrame(resolve));
-}
-
-function getCardImageSources(cards) {
-  return cards.flatMap((card) => Array.from(card.querySelectorAll("img"), (image) => image.currentSrc || image.src));
-}
-
-function renderCards() {
-  workGrid.innerHTML = caseItems.map((item) => `<article class="work-card reveal" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">${renderArrow("upRight")}</span></div><p>${item.description}</p></button></article>`).join("");
+function renderCards(filter = activeFilter, shouldReveal = true) {
+  const visibleItems = caseItems.filter((item) => filter === "all" || item.category === filter);
+  workGrid.innerHTML = visibleItems.map((item) => `<article class="work-card reveal${shouldReveal ? "" : " is-visible"}" data-category="${item.category}"><button class="work-open" type="button" data-case="${item.id}" aria-label="Открыть кейс: ${item.title}">${renderPreview(item)}<div class="work-meta"><div><span>${String(item.number).padStart(2, "0")} · ${item.categoryLabel}</span><h3>${item.title}</h3></div><span class="open-arrow" aria-hidden="true">${renderArrow("upRight")}</span></div><p>${item.description}</p></button></article>`).join("");
   portfolioCards = Array.from(workGrid.children);
-  workGrid.querySelectorAll("[data-case]").forEach((button) => button.addEventListener("click", () => openCase(button.dataset.case)));
+  processTypography(workGrid);
+  if (shouldReveal) observeReveals(portfolioCards);
+  setupCardImageLoading();
   setupCardTilt();
+}
+
+workGrid.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("[data-case]");
+  if (!button || !workGrid.contains(button)) return;
+  openCase(button.dataset.case);
+});
+
+function queueCardCoverHydration(card, priority = "background") {
+  const existingTask = cardCoverTasks.get(card);
+  if (existingTask) {
+    if (priority === "critical" && !existingTask.started && existingTask.priority !== "critical") {
+      const index = backgroundCardCoverQueue.indexOf(existingTask);
+      if (index >= 0) backgroundCardCoverQueue.splice(index, 1);
+      existingTask.priority = "critical";
+      criticalCardCoverQueue.unshift(existingTask);
+      runCardCoverHydrationQueue();
+    }
+    if (priority === "critical" && existingTask.started) {
+      card.querySelectorAll(".cover-panel img").forEach((image) => { image.fetchPriority = "high"; });
+    }
+    return;
+  }
+  const task = { card, priority, started: false };
+  cardCoverTasks.set(card, task);
+  (priority === "critical" ? criticalCardCoverQueue : backgroundCardCoverQueue).push(task);
+  runCardCoverHydrationQueue();
+}
+
+function runCardCoverHydrationQueue() {
+  while (activeCardCoverHydrations < cardCoverHydrationLimit) {
+    const task = criticalCardCoverQueue.shift()
+      ?? (activeBackgroundCardCoverHydrations < 1 ? backgroundCardCoverQueue.shift() : null);
+    if (!task) break;
+    const { card, priority } = task;
+    if (!card.isConnected) {
+      cardCoverTasks.delete(card);
+      continue;
+    }
+    task.started = true;
+    activeCardCoverHydrations += 1;
+    if (priority === "background") activeBackgroundCardCoverHydrations += 1;
+    const placeholders = Array.from(card.querySelectorAll(".cover-image-placeholder"));
+    let remaining = placeholders.length;
+    const settle = () => {
+      remaining -= 1;
+      if (remaining > 0) return;
+      card.dataset.coversReady = "true";
+      cardCoverTasks.delete(card);
+      activeCardCoverHydrations -= 1;
+      if (priority === "background") activeBackgroundCardCoverHydrations -= 1;
+      runCardCoverHydrationQueue();
+    };
+    if (!remaining) {
+      card.dataset.coversReady = "true";
+      cardCoverTasks.delete(card);
+      activeCardCoverHydrations -= 1;
+      if (priority === "background") activeBackgroundCardCoverHydrations -= 1;
+      runCardCoverHydrationQueue();
+      continue;
+    }
+    placeholders.forEach((placeholder) => {
+      const image = document.createElement("img");
+      image.src = placeholder.dataset.src;
+      image.alt = "";
+      image.width = Number(placeholder.dataset.width);
+      image.height = Number(placeholder.dataset.height);
+      image.loading = "eager";
+      image.fetchPriority = priority === "critical" ? "high" : "low";
+      image.decoding = "async";
+      let imageSettled = false;
+      const settleImage = () => {
+        if (imageSettled) return;
+        imageSettled = true;
+        settle();
+      };
+      const finish = () => image.decode().catch(() => {}).finally(settleImage);
+      image.addEventListener("load", finish, { once: true });
+      image.addEventListener("error", settleImage, { once: true });
+      placeholder.replaceWith(image);
+      if (image.complete) queueMicrotask(finish);
+    });
+  }
+}
+
+function setupCardImageLoading() {
+  cardCoverObserver?.disconnect();
+  cardCoverObserver = null;
+  if (!("IntersectionObserver" in window)) {
+    portfolioCards.forEach((card) => queueCardCoverHydration(card, "critical"));
+    return;
+  }
+  cardCoverObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      cardCoverObserver.unobserve(entry.target);
+      const visible = entry.boundingClientRect.bottom > 0 && entry.boundingClientRect.top < window.innerHeight;
+      queueCardCoverHydration(entry.target, visible ? "critical" : "background");
+    });
+  }, { rootMargin: "200% 0px", threshold: 0 });
+  portfolioCards.forEach((card) => cardCoverObserver.observe(card));
 }
 
 function resetCardTilt(collage) {
@@ -327,10 +464,6 @@ function resetCardTilt(collage) {
   collage.classList.remove("is-tilting");
   stage.style.setProperty("--tilt-x", "0deg");
   stage.style.setProperty("--tilt-y", "0deg");
-  collage.querySelectorAll(".cover-panel").forEach((panel) => {
-    panel.style.setProperty("--pointer-x", "0px");
-    panel.style.setProperty("--pointer-y", "0px");
-  });
 }
 
 function setupCardTilt() {
@@ -338,10 +471,10 @@ function setupCardTilt() {
 
   workGrid.querySelectorAll(".work-collage").forEach((collage) => {
     const stage = collage.querySelector(".cover-stage");
-    const panels = Array.from(collage.querySelectorAll(".cover-panel"));
     let frameId = 0;
     let pointerX = 0;
     let pointerY = 0;
+    let bounds = null;
 
     const paintTilt = () => {
       frameId = 0;
@@ -353,20 +486,20 @@ function setupCardTilt() {
       collage.classList.add("is-tilting");
       stage.style.setProperty("--tilt-x", `${(-pointerY * 1.5).toFixed(2)}deg`);
       stage.style.setProperty("--tilt-y", `${(pointerX * 1.7).toFixed(2)}deg`);
-      panels.forEach((panel, index) => {
-        const depth = index === 1 ? 4 : 2;
-        panel.style.setProperty("--pointer-x", `${(pointerX * depth).toFixed(2)}px`);
-        panel.style.setProperty("--pointer-y", `${(pointerY * depth).toFixed(2)}px`);
-      });
     };
 
     const scheduleTilt = () => {
       if (!frameId) frameId = requestAnimationFrame(paintTilt);
     };
 
+    const updateBounds = () => { bounds = collage.getBoundingClientRect(); };
+    collage.addEventListener("pointerenter", () => {
+      updateBounds();
+      activeTiltBoundsUpdate = updateBounds;
+    });
     collage.addEventListener("pointermove", (event) => {
       if (prefersReducedMotion()) return;
-      const bounds = collage.getBoundingClientRect();
+      if (!bounds) updateBounds();
       pointerX = ((event.clientX - bounds.left) / bounds.width - .5) * 2;
       pointerY = ((event.clientY - bounds.top) / bounds.height - .5) * 2;
       scheduleTilt();
@@ -377,10 +510,18 @@ function setupCardTilt() {
       frameId = 0;
       pointerX = 0;
       pointerY = 0;
+      bounds = null;
+      if (activeTiltBoundsUpdate === updateBounds) activeTiltBoundsUpdate = null;
+      resetCardTilt(collage);
+    });
+    collage.addEventListener("pointercancel", () => {
+      if (activeTiltBoundsUpdate === updateBounds) activeTiltBoundsUpdate = null;
       resetCardTilt(collage);
     });
   });
 }
+
+window.addEventListener("resize", () => activeTiltBoundsUpdate?.(), { passive: true });
 
 function createCaseState(item) {
   if (item.type === "infographic") {
@@ -435,11 +576,64 @@ function renderVariantGallery(view) {
   }
   return view.media.map((mediaItem, index) => {
     const resultNumber = view.media.slice(0, index + 1).filter((item) => !item.isSource).length;
-    const image = `<img src="${mediaItem.src}" alt="${view.title} — ${mediaItem.isSource ? "исходник" : `работа ${resultNumber}`}" loading="${index === 0 ? "eager" : "lazy"}" decoding="async">`;
+    const width = 900;
+    const height = view.galleryType === "banners" ? 450 : Math.round(width / (mediaItem.aspectRatio ?? .75));
+    const alt = `${view.title} — ${mediaItem.isSource ? "исходник" : `работа ${resultNumber}`}`;
+    const loading = index < 2 ? "eager" : "lazy";
+    const priority = index < 2 ? "high" : "low";
+    const image = `<img src="${mediaItem.src}" alt="${alt}" width="${width}" height="${height}" loading="${loading}" fetchpriority="${priority}" decoding="async">`;
     if (!mediaItem.isSource) return image;
     return `<figure class="dialog-media-source" style="--media-ratio: ${mediaItem.aspectRatio}">${image}<figcaption class="source-badge">исходник</figcaption></figure>`;
   }).join("");
 }
+
+function hydrateDialogGallery() {
+  dialogGalleryObserver?.disconnect();
+  dialogGalleryObserver = null;
+  if (dialogGalleryPriorityFrame) cancelAnimationFrame(dialogGalleryPriorityFrame);
+  dialogGalleryPriorityFrame = 0;
+  const gallery = dialogContent.querySelector(".dialog-gallery:not(.dialog-gallery-video)");
+  if (!gallery) return;
+  const images = Array.from(gallery.querySelectorAll("img"));
+  images.slice(2, 4).forEach((image) => prepareImageSource(image.currentSrc || image.src, { priority: "background" }));
+  if (!("IntersectionObserver" in window)) return;
+  dialogGalleryObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      dialogGalleryObserver.unobserve(entry.target);
+      entry.target.loading = "eager";
+      entry.target.fetchPriority = "high";
+      prepareImageSource(entry.target.currentSrc || entry.target.src, { priority: "critical" });
+    });
+  }, { root: dialog, rootMargin: "150% 0px", threshold: 0 });
+  images.slice(2).forEach((image) => dialogGalleryObserver.observe(image));
+  scheduleDialogGalleryPriority();
+}
+
+function prioritizeDialogGalleryImages() {
+  dialogGalleryPriorityFrame = 0;
+  if (!dialog.open) return;
+  const gallery = dialogContent.querySelector(".dialog-gallery:not(.dialog-gallery-video)");
+  if (!gallery) return;
+  const dialogRect = dialog.getBoundingClientRect();
+  const prefetchDistance = dialog.clientHeight * 1.5;
+  const imagesToPromote = Array.from(gallery.querySelectorAll("img")).filter((image) => {
+    const rect = image.getBoundingClientRect();
+    return rect.bottom > dialogRect.top - prefetchDistance && rect.top < dialogRect.bottom + prefetchDistance;
+  });
+  imagesToPromote.forEach((image) => {
+    image.loading = "eager";
+    image.fetchPriority = "high";
+    prepareImageSource(image.currentSrc || image.src, { priority: "critical" });
+  });
+}
+
+function scheduleDialogGalleryPriority() {
+  if (dialogGalleryPriorityFrame) return;
+  dialogGalleryPriorityFrame = requestAnimationFrame(prioritizeDialogGalleryImages);
+}
+
+dialog.addEventListener("scroll", scheduleDialogGalleryPriority, { passive: true });
 
 function renderCaseVariant(view, titleId = "dialog-title") {
   return `<header class="dialog-heading"><h2 id="${titleId}">${view.title}</h2><p class="dialog-intro">${view.intro}</p></header><div class="dialog-details">${view.details.map(([label, text]) => `<div><span>${label}</span><strong>${text}</strong></div>`).join("")}</div><div class="dialog-gallery dialog-gallery-${view.galleryType}">${renderVariantGallery(view)}</div>`;
@@ -495,6 +689,7 @@ function applyCaseVariant(index) {
   const variableContent = dialogContent.querySelector(".case-variant-content");
   variableContent.innerHTML = renderCaseVariant(view);
   processTypography(variableContent);
+  hydrateDialogGallery();
   updateCaseNavigation();
   return view;
 }
@@ -534,7 +729,7 @@ function preloadAdjacentCaseVariant(direction = 1) {
   const generation = casePreloadGeneration;
   const source = getCaseVariantView(currentCaseState, targetIndex).images[0];
   if (!source) return;
-  prepareImageSource(source).then(() => {
+  prepareImageSource(source, { priority: "background" }).then(() => {
     if (generation !== casePreloadGeneration || !dialog.open) return;
   });
 }
@@ -563,6 +758,10 @@ function cancelContentSwitch() {
   setCaseBusy(false);
   const variableContent = dialogContent.querySelector(".case-variant-content");
   variableContent?.style.removeProperty("transform");
+  dialogGalleryObserver?.disconnect();
+  dialogGalleryObserver = null;
+  if (dialogGalleryPriorityFrame) cancelAnimationFrame(dialogGalleryPriorityFrame);
+  dialogGalleryPriorityFrame = 0;
 }
 
 function trackCaseSwitchAnimation(animation) {
@@ -601,8 +800,7 @@ async function switchCaseVariant(nextIndex, direction) {
   const token = ++caseSwitchToken;
   const nextView = getCaseVariantView(currentCaseState, nextIndex);
   const criticalSource = getCriticalCaseImageSource(nextView);
-  if (criticalSource && !preparedImageSources.has(criticalSource)) await prepareImageSource(criticalSource);
-  if (!prefersReducedMotion()) await nextAnimationFrame();
+  if (criticalSource && !preparedImageSources.has(criticalSource)) prepareImageSource(criticalSource, { priority: "critical" });
   if (token !== caseSwitchToken || !dialog.open) return;
 
   const variableContent = dialogContent.querySelector(".case-variant-content");
@@ -634,8 +832,12 @@ async function switchCaseVariant(nextIndex, direction) {
   variableContent.replaceChildren(nextFragment);
   currentCaseState.index = nextIndex;
   dialogKicker.textContent = `Кейс ${String(nextView.number).padStart(2, "0")} · ${nextView.categoryLabel}`;
+  hydrateDialogGallery();
   updateCaseNavigation();
-  dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
+  requestAnimationFrame(() => {
+    if (token !== caseSwitchToken || !dialog.open) return;
+    dialog.scrollTop = Math.min(previousScroll, Math.max(0, dialog.scrollHeight - dialog.clientHeight));
+  });
 
   const incomingAnimation = trackCaseSwitchAnimation(variableContent.animate([
     { transform: `translate3d(${direction * distance}px,0,0)` },
@@ -658,6 +860,7 @@ function openCase(caseId) {
   if (!prefersReducedMotion()) dialog.classList.add("is-preparing");
   dialog.showModal();
   document.body.classList.add("dialog-open");
+  scheduleDialogGalleryPriority();
   preloadAdjacentCaseVariant(1);
 
   if (!prefersReducedMotion()) {
@@ -719,100 +922,54 @@ dialog.addEventListener("close", () => {
 const filterButtons = document.querySelectorAll("[data-filter]");
 let activeFilter = "all";
 let renderedFilter = "all";
-let filterToken = 0;
-const filterTransitionAnimations = new Set();
-let filterTransitionLayers = [];
-let filterTransitionCards = [];
-let filterCleanupFrame = 0;
-let filterPreloadObserver = null;
-let filterPreloadStarted = false;
-
-function cardMatchesFilter(card, filter) {
-  return filter === "all" || card.dataset.category === filter;
-}
-
-function getPortfolioCards() {
-  return portfolioCards;
-}
-
-function getGridColumnCount() {
-  return Math.max(1, getComputedStyle(workGrid).gridTemplateColumns.split(" ").filter(Boolean).length);
-}
-
-function getFilterAnimationWindow(currentCards, nextCards) {
-  const visibleIndexes = [];
-  currentCards.forEach((card, index) => {
-    const rect = card.getBoundingClientRect();
-    if (rect.bottom > 0 && rect.top < window.innerHeight) visibleIndexes.push(index);
-  });
-  if (visibleIndexes.length === 0 || currentCards.length === 0) return null;
-
-  const columns = getGridColumnCount();
-  const firstRowHeight = Math.max(...currentCards.slice(0, columns).map((card) => card.getBoundingClientRect().height));
-  const rowGap = Number.parseFloat(getComputedStyle(workGrid).rowGap) || 0;
-  const rowSpan = firstRowHeight + rowGap;
-  const startRow = Math.floor(visibleIndexes[0] / columns);
-  const endRow = Math.floor(visibleIndexes[visibleIndexes.length - 1] / columns) + 1;
-  const startIndex = startRow * columns;
-  const endIndex = endRow * columns;
-  const incomingCards = nextCards.slice(startIndex, endIndex);
-  if (incomingCards.length === 0) return null;
-
-  const nextRows = Math.ceil(nextCards.length / columns);
-  const estimatedNextHeight = nextRows > 0 ? nextRows * firstRowHeight + Math.max(0, nextRows - 1) * rowGap : 0;
-  return {
-    incomingCards,
-    outgoingCards: currentCards.slice(startIndex, endIndex),
-    topOffset: startRow * rowSpan,
-    estimatedNextHeight
-  };
-}
+let activeFilterAnimation = null;
 
 function clearFilterTransition() {
-  filterTransitionAnimations.forEach((animation) => animation.cancel());
-  filterTransitionAnimations.clear();
-  cancelAnimationFrame(filterCleanupFrame);
-  filterCleanupFrame = 0;
-  filterTransitionLayers.forEach((layer) => layer.remove());
-  filterTransitionLayers = [];
-  filterTransitionCards.forEach((card) => card.style.removeProperty("visibility"));
-  filterTransitionCards = [];
-  workGrid.classList.remove("is-filter-transitioning");
-  workGrid.style.removeProperty("min-height");
+  activeFilterAnimation?.cancel();
+  activeFilterAnimation = null;
 }
 
-function applyFilter(filter) {
-  const insertionPoint = filterTransitionLayers.find((layer) => layer.parentElement === workGrid) ?? null;
-  Array.from(workGrid.children).filter((element) => element.classList.contains("work-card")).forEach((card) => card.remove());
-  getPortfolioCards().filter((card) => cardMatchesFilter(card, filter)).forEach((card) => {
-    card.hidden = false;
-    card.classList.add("is-visible");
-    workGrid.insertBefore(card, insertionPoint);
-  });
-  renderedFilter = filter;
+function prefetchFilterCovers(filter, count = 2) {
+  caseItems
+    .filter((item) => filter === "all" || item.category === filter)
+    .slice(0, count)
+    .map((item) => previewImageSource(item.coverImages[0]))
+    .forEach((source) => prepareImageSource(source, { priority: "critical" }));
 }
 
-function createFilterTransitionLayer(cards, topOffset, stateClass) {
-  const layer = document.createElement("div");
-  layer.className = `work-grid work-grid-transition-layer ${stateClass}`;
-  layer.setAttribute("aria-hidden", "true");
-  layer.setAttribute("inert", "");
-  layer.style.setProperty("top", `${topOffset}px`);
-  cards.forEach((card) => {
-    const clone = card.cloneNode(true);
-    clone.hidden = false;
-    clone.classList.add("is-visible");
-    clone.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
-    clone.querySelectorAll("a, button, input, select, textarea, [tabindex]").forEach((element) => element.setAttribute("tabindex", "-1"));
-    clone.querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
-    layer.appendChild(clone);
-  });
-  return layer;
+function ensurePortfolioRendered() {
+  if (portfolioInitialized) return;
+  portfolioInitialized = true;
+  renderCards(activeFilter);
+  const schedulePrefetch = window.requestIdleCallback
+    ? (callback) => window.requestIdleCallback(callback, { timeout: 900 })
+    : (callback) => window.setTimeout(callback, 180);
+  schedulePrefetch(() => prefetchFilterCovers(activeFilter));
 }
 
-filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", async () => {
+function scheduleCoverWarmup() {
+  const sources = Array.from(new Set(caseItems.flatMap((item) => item.coverImages.map(previewImageSource))));
+  let index = 0;
+  const schedule = (callback) => window.requestIdleCallback
+    ? window.requestIdleCallback(callback, { timeout: 700 })
+    : window.setTimeout(callback, 120);
+  const prepareBatch = (deadline) => {
+    let prepared = 0;
+    while (index < sources.length && (prepared < 4 || deadline?.timeRemaining?.() > 6)) {
+      prepareImageSource(sources[index], { priority: "background" });
+      index += 1;
+      prepared += 1;
+    }
+    if (index < sources.length) schedule(prepareBatch);
+  };
+  const start = () => schedule(prepareBatch);
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start, { once: true });
+}
+
+filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", () => {
   const nextFilter = button.dataset.filter;
-  if (nextFilter === activeFilter) return;
+  if (nextFilter === activeFilter && renderedFilter === nextFilter) return;
   const currentButtonIndex = Array.from(filterButtons).findIndex((item) => item.dataset.filter === renderedFilter);
   const direction = buttonIndex > currentButtonIndex ? 1 : -1;
   activeFilter = nextFilter;
@@ -822,84 +979,29 @@ filterButtons.forEach((button, buttonIndex) => button.addEventListener("click", 
     item.setAttribute("aria-pressed", String(active));
   });
 
-  const token = ++filterToken;
+  ensurePortfolioRendered();
   clearFilterTransition();
-  if (nextFilter === renderedFilter) {
-    applyFilter(nextFilter);
-    return;
-  }
-
-  const cards = getPortfolioCards();
-  const nextCards = cards.filter((card) => cardMatchesFilter(card, nextFilter));
-  const currentCards = Array.from(workGrid.children).filter((element) => element.classList.contains("work-card"));
-  const animationWindow = getFilterAnimationWindow(currentCards, nextCards);
-  if (prefersReducedMotion() || typeof workGrid.animate !== "function" || !animationWindow) {
-    applyFilter(nextFilter);
-    return;
-  }
-
-  await prepareImages(getCardImageSources(animationWindow.incomingCards));
-  if (token !== filterToken) return;
-
-  const oldLayer = createFilterTransitionLayer(animationWindow.outgoingCards, animationWindow.topOffset, "is-leaving");
-  const nextLayer = createFilterTransitionLayer(animationWindow.incomingCards, animationWindow.topOffset, "is-entering");
-  oldLayer.style.visibility = "hidden";
-  nextLayer.style.visibility = "hidden";
-  workGrid.append(oldLayer, nextLayer);
-  const oldHeight = Math.ceil(workGrid.getBoundingClientRect().height);
-  const stableHeight = Math.max(oldHeight, Math.ceil(animationWindow.estimatedNextHeight));
-  workGrid.style.setProperty("min-height", `${stableHeight}px`);
-  workGrid.classList.add("is-filter-transitioning");
-  animationWindow.outgoingCards.forEach((card) => card.style.setProperty("visibility", "hidden"));
-  oldLayer.style.removeProperty("visibility");
-  nextLayer.style.removeProperty("visibility");
-  filterTransitionLayers = [oldLayer, nextLayer];
-  filterTransitionCards = animationWindow.outgoingCards;
-
-  const animationOptions = { duration: 260, easing: "cubic-bezier(.22,.72,.22,1)", fill: "both" };
-  const oldAnimation = oldLayer.animate([
-    { transform: "translate3d(0,0,0)" },
-    { transform: `translate3d(${-direction * 100}%,0,0)` }
-  ], animationOptions);
-  const nextAnimation = nextLayer.animate([
-    { transform: `translate3d(${direction * 100}%,0,0)` },
-    { transform: "translate3d(0,0,0)" }
-  ], animationOptions);
-  filterTransitionAnimations.add(oldAnimation);
-  filterTransitionAnimations.add(nextAnimation);
-  await Promise.all([oldAnimation, nextAnimation].map((animation) => animation.finished.catch(() => {})));
-  if (token !== filterToken) return;
-
-  applyFilter(nextFilter);
-  filterCleanupFrame = requestAnimationFrame(() => {
-    if (token !== filterToken) return;
-    clearFilterTransition();
+  prefetchFilterCovers(nextFilter);
+  renderCards(nextFilter, false);
+  renderedFilter = nextFilter;
+  if (prefersReducedMotion() || typeof workGrid.animate !== "function") return;
+  const nextAnimation = workGrid.animate([
+    { opacity: 0, transform: `translate3d(${direction * 24}px,0,0)` },
+    { opacity: 1, transform: "translate3d(0,0,0)" }
+  ], { duration: 165, easing: "cubic-bezier(.2,.75,.2,1)", fill: "both" });
+  activeFilterAnimation = nextAnimation;
+  nextAnimation.finished.catch(() => {}).finally(() => {
+    if (activeFilterAnimation !== nextAnimation) return;
+    nextAnimation.cancel();
+    activeFilterAnimation = null;
   });
 }));
 
-function scheduleFilterPreload() {
-  if (filterPreloadStarted) return;
-  filterPreloadStarted = true;
-  const columns = getGridColumnCount();
-  const firstRowCards = Array.from(filterButtons).flatMap((button) => (
-    getPortfolioCards().filter((card) => cardMatchesFilter(card, button.dataset.filter)).slice(0, columns)
-  ));
-  prepareImages(getCardImageSources(Array.from(new Set(firstRowCards))));
-}
-
-function setupFilterPreload() {
-  if (!("IntersectionObserver" in window)) {
-    requestAnimationFrame(scheduleFilterPreload);
-    return;
-  }
-  filterPreloadObserver = new IntersectionObserver((entries) => {
-    if (!entries.some((entry) => entry.isIntersecting)) return;
-    filterPreloadObserver.disconnect();
-    filterPreloadObserver = null;
-    scheduleFilterPreload();
-  }, { rootMargin: "650px 0px", threshold: 0 });
-  filterPreloadObserver.observe(document.querySelector("#works"));
-}
+filterButtons.forEach((button) => {
+  const prefetch = () => prefetchFilterCovers(button.dataset.filter, 1);
+  button.addEventListener("pointerenter", prefetch, { passive: true });
+  button.addEventListener("focus", prefetch);
+});
 
 const shortWordPattern = /(^|[\s\u00a0(«„"—–-])(в|во|и|а|но|к|ко|с|со|у|о|об|от|до|за|из|на|по|для|при)\s+(?=[^\s\u00a0])/gi;
 
@@ -949,23 +1051,35 @@ function setupReveal() {
     elements.forEach((element) => element.classList.add("is-visible"));
     return;
   }
-  const revealObserver = new IntersectionObserver((entries) => {
+  revealObserver = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (entry.isIntersecting) {
+        entry.target.classList.add("is-revealing");
         entry.target.classList.add("is-visible");
         revealObserver.unobserve(entry.target);
+        entry.target.addEventListener("transitionend", () => entry.target.classList.remove("is-revealing"), { once: true });
       }
     });
   }, { threshold: 0.08, rootMargin: "0px 0px -6% 0px" });
   elements.forEach((element) => revealObserver.observe(element));
 }
 
+function observeReveals(elements) {
+  elements.forEach((element, index) => {
+    element.style.setProperty("--reveal-delay", `${Math.min(index * 65, 300)}ms`);
+    if (prefersReducedMotion() || !revealObserver) element.classList.add("is-visible");
+    else revealObserver.observe(element);
+  });
+}
+
 function handleReducedMotionChange() {
   if (!prefersReducedMotion()) return;
   workGrid.querySelectorAll(".work-collage").forEach(resetCardTilt);
-  filterToken += 1;
   clearFilterTransition();
-  applyFilter(activeFilter);
+  if (portfolioInitialized) {
+    renderCards(activeFilter, false);
+    renderedFilter = activeFilter;
+  }
   cancelContentSwitch();
   document.querySelectorAll(".reveal").forEach((element) => element.classList.add("is-visible"));
   if (dialog.classList.contains("is-closing")) finishDialogClose();
@@ -975,7 +1089,8 @@ function handleReducedMotionChange() {
 if (typeof reducedMotion.addEventListener === "function") reducedMotion.addEventListener("change", handleReducedMotionChange);
 else if (typeof reducedMotion.addListener === "function") reducedMotion.addListener(handleReducedMotionChange);
 
-renderCards();
-setupFilterPreload();
 processTypography(document.body);
 setupReveal();
+portfolioInitialized = true;
+renderCards(activeFilter, false);
+scheduleCoverWarmup();
